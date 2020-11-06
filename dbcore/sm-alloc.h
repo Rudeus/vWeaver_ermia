@@ -110,6 +110,9 @@ struct thread_data {
 void prepare_node_memory();
 void *allocate(size_t size);
 void deallocate(fat_ptr p);
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+void deallocate_rb(fat_ptr p);
+#endif /* HYU_RBTREE */
 void *allocate_onnode(size_t size);
 epoch_mgr::tls_storage *get_tls(void *);
 void global_init(void *);

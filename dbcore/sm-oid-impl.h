@@ -7,7 +7,6 @@
 #include "stub-impl.h"
 
 namespace ermia {
-
 struct sm_oid_mgr_impl : sm_oid_mgr {
   /* The object array for each file resides in the OID array for
      file 0; allocators go in file 1 (including the file allocator,

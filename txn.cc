@@ -195,6 +195,16 @@ void transaction::Abort() {
       MM::deallocate(obj->GetLvPointer());
     }
 #endif /* HYU_SKIPLIST */
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+    struct rb_root *root = (struct rb_root *)obj->GetRoot().offset();
+    if (root) {
+      root->TreeLockAcquire();
+      rbnode *data =  oidmgr->FindRBtreeRightmost(root, entry);
+      rb_erase(&data->node, root);
+      root->TreeLockRelease();
+      rb_deallocate(data);
+    }
+#endif /* HYU_RBTREE */
     MM::deallocate(entry);
   }
 

@@ -386,11 +386,34 @@ void deallocate(fat_ptr p) {
   obj->SetVRidgyLevel(0);
   obj->rec_id = 0;
 #endif /* HYU_VWEAVER */
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+  obj->SetRoot(NULL_PTR);
+  obj->SetPrev(NULL_PTR);
+#endif /* HYU_RBTREE */
   if (!tls_free_object_pool) {
     tls_free_object_pool = new TlsFreeObjectPool;
   }
   tls_free_object_pool->Put(p);
 }
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+void deallocate_rb(fat_ptr p) {
+  ASSERT(p != NULL_PTR);
+  ASSERT(p.size_code());
+  ASSERT(p.size_code() != INVALID_SIZE_CODE);
+  rbnode *del_node = (rbnode *)p.offset();
+  del_node->node.rb_parent_color = 0;
+  del_node->node.rb_right = nullptr;
+  del_node->node.rb_left = nullptr;
+  del_node->ptr = NULL_PTR;
+
+  if (!tls_free_object_pool) {
+    tls_free_object_pool = new TlsFreeObjectPool;
+  }
+  tls_free_object_pool->Put(p);
+}
+#endif /* HYU_RBTREE */
 
 // epoch mgr callbacks
 void global_init(void *) {

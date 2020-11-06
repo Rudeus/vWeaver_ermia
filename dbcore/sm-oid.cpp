@@ -20,6 +20,9 @@
 #include "sm-log-recover-impl.h"
 #include "sm-object.h"
 #include "sm-oid-impl.h"
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+#include "sm-common.h"
+#endif /* HYU_RBTREE */
 
 namespace ermia {
 sm_oid_mgr *oidmgr = NULL;
@@ -30,6 +33,19 @@ thread_local uint64_t seed;
 #if defined(HYU_EVAL_2) || defined(HYU_EVAL_OBJ)
 uint64_t total_next_cnt = 0;
 #endif
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+void *rb_allocate() {
+	rbnode *obj = (rbnode *)MM::allocate(sizeof(rbnode));
+  return obj;
+}
+
+void rb_deallocate(void *p) {
+  size_t size = sizeof(rbnode);
+  size_t size_code = encode_size_aligned(size);
+  MM::deallocate_rb(fat_ptr::make(p, size_code));
+}
+#endif /* HYU_RBTREE */
 
 struct thread_data {
   static size_t const NENTRIES = 4096;
@@ -788,6 +804,87 @@ bool sm_oid_mgr::SubmitSkipListChain(fat_ptr new_obj) {
 
 #endif /* HYU_SKIPLIST */
 
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+rbnode *sm_oid_mgr::FindRBtreeRightmost(struct rb_root *root, fat_ptr old_obj) {
+  struct rb_node *internal_node = root->rb_node;
+
+  while (internal_node) {
+    //rbnode *data = container_of(internal_node, rbnode, node);
+
+    ////
+    const rb_node *__mptr = internal_node;
+    rbnode *data = (rbnode *)( (char *)__mptr - offsetof(rbnode, node) );
+    ////
+		
+    if (data->ptr.offset() == old_obj.offset()) {
+      return data;
+    } else {
+      internal_node = internal_node->rb_right;
+    }
+  }
+
+  if (internal_node == NULL) {
+    printf("no!\n");
+    return NULL;
+  }
+
+  return NULL;
+}
+
+void sm_oid_mgr::ExchangeRBvalue(fat_ptr new_obj, fat_ptr old_obj) {
+  Object *obj = (Object *)new_obj.offset();
+	fat_ptr rb_root = obj->GetRoot();
+  struct rb_root *root = (struct rb_root *)rb_root.offset();
+
+  rbnode *node = FindRBtreeRightmost(root, old_obj);
+  if (node != NULL)
+    node->ptr = new_obj;
+  else
+    printf("fail to exchange rbtree value\n");
+}
+
+bool sm_oid_mgr::InsertRBtree(struct rb_root *root, rbnode *data) {
+  struct rb_node **new_node = &(root->rb_node), *parent = NULL;
+
+  while (*new_node) {
+    //rbnode *this_node = container_of(*new_node, rbnode, node);
+    ////
+    const rb_node *__mptr = *new_node;
+    rbnode *this_node = (rbnode *)( (char *)__mptr - offsetof(rbnode, node) );
+    ////
+
+    Object *first = (Object *)this_node->ptr.offset();
+    Object *second = (Object *)data->ptr.offset();
+    uint16_t asi_type = second->GetClsn().asi_type();
+    bool result = false;
+    if (asi_type == fat_ptr:: ASI_XID) {
+      result = true;
+    } else if (asi_type == fat_ptr::ASI_LOG) {
+      result = (LSN::from_ptr(first->GetClsn()).offset() <
+                            LSN::from_ptr(second->GetClsn()).offset());
+    } else {
+      return false;
+    }
+
+    ASSERT(result == true);
+    parent = *new_node;
+    if (result)
+      new_node = &((*new_node)->rb_right);
+		else {
+      // for debug
+      printf("why node goes left????\n");
+      return false;
+    }
+  }
+
+  /* Add new node and rebalande tree. */
+  rb_link_node(&data->node, parent, new_node);
+  rb_insert_color(&data->node, root);
+
+  return true;
+}
+#endif /* HYU_RBTREE */
+
 fat_ptr sm_oid_mgr::PrimaryTupleUpdate(FID f, OID o, const varstr *value,
                                        TXN::xid_context *updater_xc,
                                        fat_ptr *new_obj_ptr) {
@@ -923,10 +1020,38 @@ install:
     }
 
     // submit chain
-    bool submit = oidmgr->SubmitSkipListChain(head);
+    bool submit = SubmitSkipListChain(head);
 
   }
 #endif /* HYU_SKIPLIST */
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+  if (old_desc->GetRoot() == NULL_PTR) {
+    // make new root
+		size_t size_rbroot = sizeof(struct rb_root);
+    struct rb_root *new_rbroot = (struct rb_root *)MM::allocate(size_rbroot);
+
+    new_rbroot->rb_node = nullptr;
+    new_rbroot->rb_lock = false;
+
+    size_t size_rbcode = encode_size_aligned(size_rbroot);
+    ASSERT(size_rbcode != INVALID_SIZE_CODE);
+    fat_ptr new_root = fat_ptr::make(new_rbroot, size_rbcode, 0);
+
+    //if (old_desc->GetRoot() == NULL_PTR) {
+    if (__sync_bool_compare_and_swap(&old_desc->root_._ptr, 0, new_root._ptr)) {
+      //old_desc->SetRoot(new_root);
+
+      rbnode *new_rbnode = (rbnode *)rb_allocate();
+      new_rbnode->ptr = head;
+
+      bool submit = InsertRBtree(new_rbroot, new_rbnode);
+    } else {
+      MM::deallocate(new_root);
+    }
+  }
+#endif /* HYU_RBTREE */
+
   // HYU_GC
   //new_object->HYU_candidate_clsn_ = volatile_read(MM::gc_lsn);
   // HYU_GC end
@@ -947,6 +1072,15 @@ install:
     new_object->rec_id = old_desc->rec_id;
     SentinelOverwrite(*new_obj_ptr);
 #endif /* HYU_SKIPLIST */
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+    new_object->SetRoot(old_desc->GetRoot());
+    struct rb_root *temp_root = (struct rb_root *)old_desc->GetRoot().offset();
+    temp_root->TreeLockAcquire();
+    ExchangeRBvalue(*new_obj_ptr, head);
+    temp_root->TreeLockRelease();
+    Object *next = (Object *)old_desc->GetNextVolatile().offset();
+    next->SetPrev(*new_obj_ptr);
+#endif /* HYU_RBTREE */
     // I already claimed it, no need to use cas then
     volatile_write(ptr->_ptr, new_obj_ptr->_ptr);
     __sync_synchronize();
@@ -1017,12 +1151,26 @@ install:
     __sync_synchronize();
 #endif /* HYU_SKIPLIST */
 
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+    new_object->SetRoot(old_desc->GetRoot());
+#endif /* HYU_RBTREE */
+
     if (__sync_bool_compare_and_swap(&ptr->_ptr, head._ptr,
                                      new_obj_ptr->_ptr)) {
 #ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
       // submit chain
       bool submit = SubmitSkipListChain(*new_obj_ptr);
 #endif /* HYU_SKIPLIST */
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+      rbnode *new_rbnode = (rbnode *)rb_allocate();
+      new_rbnode->ptr = *new_obj_ptr;
+      struct rb_root *rbroot = (struct rb_root *)new_object->GetRoot().offset();
+      old_desc->SetPrev(*new_obj_ptr);
+      rbroot->TreeLockAcquire();
+      bool submit = InsertRBtree(rbroot, new_rbnode);
+      rbroot->TreeLockRelease();
+#endif /* HYU_RBTREE */
 
 #ifdef HYU_VWEAVER /* HYU_VWEAVER */
 #ifdef HYU_EVAL    /* HYU_EVAL */
@@ -1992,6 +2140,107 @@ start_over:
 }
 
 #endif /* HYU_SKIPLIST */
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+// For tuple arrays only, i.e., entries are guaranteed to point to Objects.
+dbtuple *sm_oid_mgr::oid_get_version_rbtree(oid_array *oa, OID o,
+                                     TXN::xid_context *visitor_xc) {
+  fat_ptr *entry = oa->get(o);
+start_over:
+  fat_ptr ptr = volatile_read(*entry);
+  ASSERT(ptr.asi_type() == 0);
+  Object *prev_obj = nullptr;
+  struct rb_root *root = nullptr;
+
+  if (ptr.offset()) {
+    Object *cur_obj = nullptr;
+    Object *candidate_obj = nullptr;
+    struct rb_node *internal_node = nullptr;
+    rbnode *data = nullptr;
+    fat_ptr tentative_next = NULL_PTR;
+    // Must read next_ before reading cur_obj->_clsn:
+    // the version we're currently reading (ie cur_obj) might be unlinked
+    // and thus recycled by the memory allocator at any time if it's not
+    // a committed version. If so, cur_obj->_next will be pointing to some
+    // other object in the allocator's free object pool - we'll probably
+    // end up at la-la land if we followed this _next pointer value...
+    // Here we employ some flavor of OCC to solve this problem:
+    // the aborting transaction that will unlink cur_obj will update
+    // cur_obj->_clsn to NULL_PTR, then deallocate(). Before reading
+    // cur_obj->_clsn, we (as the visitor), first dereference pp to get
+    // a stable value that "should" contain the right address of the next
+    // version. We then read cur_obj->_clsn to verify: if it's NULL_PTR
+    // that means we might have read a wrong _next value that's actually
+    // pointing to some irrelevant object in the allocator's memory pool,
+    // hence must start over from the beginning of the version chain.
+    // If this is a backup server, then must see persistent_next to find out
+    // the **real** overwritten version.
+    if (config::is_backup_srv() && !config::command_log) {
+      oid_get_version_backup(ptr, tentative_next, prev_obj, cur_obj,
+                             visitor_xc);
+    } else {
+      ASSERT(ptr.asi_type() == 0);
+      cur_obj = (Object *)ptr.offset();
+      root = (struct rb_root *)cur_obj->GetRoot().offset();
+      if (!root) {
+        bool retry = false;
+        bool visible = TestVisibility(cur_obj, visitor_xc, retry);
+        if (retry) {
+          goto start_over;
+        }
+        if (visible) {
+          return cur_obj->GetPinnedTuple();
+        }
+      }
+      root->TreeLockAcquire();
+      internal_node = root->rb_node;
+
+      while (internal_node) {
+        //data = container_of(internal_node, rbnode, node);
+        ////
+        const rb_node *__mptr = internal_node;
+        data = (rbnode *)( (char *)__mptr - offsetof(rbnode, node) );
+        ////
+
+        candidate_obj = (Object *)data->ptr.offset();
+        bool retry = false;
+        bool visible = TestVisibility(candidate_obj, visitor_xc, retry);
+
+        if (retry) {
+          goto start_over;
+        }
+        if (visible) { // is visible
+          if (candidate_obj->GetPrev().offset()) {
+            Object *candidate_prev = (Object*)candidate_obj->GetPrev().offset();
+            retry = false;
+            bool visible_prev = TestVisibility(candidate_prev, visitor_xc, retry);
+
+            //if (retry) {
+            //  goto start_over;
+            //}
+            if (visible_prev) {
+              internal_node = internal_node->rb_right;
+            } else {
+              root->TreeLockRelease();
+              return candidate_obj->GetPinnedTuple();
+            }
+          } else {
+            root->TreeLockRelease();
+            return candidate_obj->GetPinnedTuple();
+          }
+        } else { // is invisible
+          internal_node = internal_node->rb_left;
+        }
+      }
+    }
+
+  }
+
+  root->TreeLockRelease();
+  return nullptr;  // No Visible records
+}
+
+#endif /* HYU_RBTREE */
 
 // For tuple arrays only, i.e., entries are guaranteed to point to Objects.
 dbtuple *sm_oid_mgr::oid_get_version(oid_array *oa, OID o,

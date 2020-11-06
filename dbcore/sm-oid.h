@@ -4,7 +4,7 @@
 #include "sm-common.h"
 #include "sm-log.h"
 #include "sm-oid-alloc-impl.h"
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_RBTREE)
 #include "sm-alloc.h"
 #endif
 
@@ -189,6 +189,12 @@ struct sm_oid_mgr {
   bool SubmitSkipListChain(fat_ptr new_obj);
 #endif /* HYU_SKIPLIST */
 
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+  rbnode *FindRBtreeRightmost(struct rb_root *root, fat_ptr old_obj);
+  void ExchangeRBvalue(fat_ptr new_obj, fat_ptr old_obj);
+  bool InsertRBtree(struct rb_root *root, rbnode *data);
+#endif /* HYU_RBTREE */
+
   /* Return a fat_ptr to the overwritten object (could be an in-flight version!)
    */
   fat_ptr PrimaryTupleUpdate(FID f, OID o, const varstr *value,
@@ -245,6 +251,11 @@ struct sm_oid_mgr {
   dbtuple *oid_get_version_skiplist_from_ver(fat_ptr ver,
                                              TXN::xid_context *visitor_xc);
 #endif /* HYU_SKIPLIST */
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+  dbtuple *oid_get_version_rbtree(oid_array *oa, OID o,
+                                  TXN::xid_context *visitor_xc);
+#endif /* HYU_RBTREE */
 
   void oid_get_version_backup(fat_ptr &ptr, fat_ptr &tentative_next,
                               Object *prev_obj, Object *&cur_obj,
@@ -336,6 +347,11 @@ struct sm_oid_mgr {
 		  MM::deallocate(head_obj->GetSentinel());
     }
 #endif /* HYU_SKIPLIST */
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+    if (head_obj->GetRoot() != NULL_PTR && head_obj->GetNextVolatile() == NULL_PTR) {
+      MM::deallocate(head_obj->GetRoot());
+    }
+#endif /* HYU_RBTREE */
     __sync_synchronize();
     // tzwang: The caller is responsible for deallocate() the head version
     // got unlinked - a update of own write will record the unlinked version
@@ -376,6 +392,11 @@ struct sm_oid_mgr {
   // Forbid direct instantiation
   sm_oid_mgr() {}
 };
+
+#ifdef HYU_RBTREE /* HYU_RBTREE */
+void *rb_allocate();
+void rb_deallocate(void *p);
+#endif /* HYU_RBTREE */
 
 extern sm_oid_mgr *oidmgr;
 }  // namespace ermia
