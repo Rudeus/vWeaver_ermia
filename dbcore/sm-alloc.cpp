@@ -397,6 +397,18 @@ void deallocate(fat_ptr p) {
   tls_free_object_pool->Put(p);
 }
 
+#ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
+void deallocate_skiplist(fat_ptr p) {
+  ASSERT(p != NULL_PTR);
+  ASSERT(p.size_code());
+  ASSERT(p.size_code() != INVALID_SIZE_CODE);
+  if (!tls_free_object_pool) {
+    tls_free_object_pool = new TlsFreeObjectPool;
+  }
+  tls_free_object_pool->Put(p);
+}
+#endif /* HYU_SKIPLIST */
+
 #ifdef HYU_RBTREE /* HYU_RBTREE */
 void deallocate_rb(fat_ptr p) {
   ASSERT(p != NULL_PTR);
@@ -414,6 +426,25 @@ void deallocate_rb(fat_ptr p) {
   tls_free_object_pool->Put(p);
 }
 #endif /* HYU_RBTREE */
+
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+void deallocate_bpt(fat_ptr p) {
+  ASSERT(p != NULL_PTR);
+  ASSERT(p.size_code());
+  ASSERT(p.size_code() != INVALID_SIZE_CODE);
+  BPlusTreeNode *del_node = (BPlusTreeNode *)p.offset();
+  del_node->isRoot = false;
+  del_node->isLeaf = false;
+  del_node->key_num = 0;
+  memset(del_node->key, 0, sizeof(int) * MAX_CHILD_NUMBER);
+  memset(del_node->pos, 0, sizeof(int) * MAX_CHILD_NUMBER);
+  memset(del_node->child, nullptr, sizeof(void*) * MAX_CHILD_NUMBER);
+  del_node->father = nullptr;
+  del_node->next = nullptr;
+  del_node->last = nullptr;
+  TotalNodes--;
+}
+#endif /* HYU_BPTREE */
 
 // epoch mgr callbacks
 void global_init(void *) {

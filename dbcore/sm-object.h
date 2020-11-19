@@ -5,8 +5,13 @@
 #include "sm-common.h"
 
 namespace ermia {
-
+#ifdef HYU_VWEAVER /* HYU_VWEAVER */
 #define MAX_LEVEL (255)
+#endif /* HYU_VWEAVER */
+
+#ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
+#define MAX_LEVEL (32)
+#endif /* HYU_SKIPLIST */
 
 struct dbtuple;
 class sm_log_recover_mgr;
@@ -182,7 +187,6 @@ class Object {
 #endif /* HYU_VWEAVER */
 
 #ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
-  fat_ptr sentinel_;
   fat_ptr lv_pointer_;
   uint8_t lv_;
 #endif /* HYU_SKIPLIST */
@@ -192,7 +196,10 @@ class Object {
 #endif /* HYU_RBTREE */
 
  public:
-#ifdef HYU_RBTREE /* HYU_RBTREE */
+#ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
+  fat_ptr sentinel_;
+#endif /* HYU_SKIPLIST */
+#if defined(HYU_RBTREE) || defined(HYU_BPTREE) /* HYU_RBTREE */
   fat_ptr root_;
 #endif /* HYU_RBTREE */
   static fat_ptr Create(const varstr* tuple_value, bool do_write,
@@ -206,10 +213,10 @@ class Object {
         next_volatile_(NULL_PTR),
 #if defined(HYU_SKIPLIST) /* HYU_SKIPLIST */
         clsn_(NULL_PTR),
-        sentinel_(NULL_PTR),
         lv_pointer_(NULL_PTR),
-        lv_(0) {}
-#elif defined(HYU_RBTREE)
+        lv_(0),
+        sentinel_(NULL_PTR) {}
+#elif defined(HYU_RBTREE) || defined(HYU_BPTREE)
         clsn_(NULL_PTR),
         prev_(NULL_PTR),
         root_(NULL_PTR) {}
@@ -227,10 +234,10 @@ class Object {
         next_volatile_(NULL_PTR),
 #if defined(HYU_SKIPLIST) /* HYU_SKIPLIST */
         clsn_(NULL_PTR),
-        sentinel_(NULL_PTR),
         lv_pointer_(NULL_PTR),
-        lv_(0) {}
-#elif defined(HYU_RBTREE)
+        lv_(0),
+        sentinel_(NULL_PTR) {}
+#elif defined(HYU_RBTREE) || defined(HYU_BPTREE)
         clsn_(NULL_PTR),
         prev_(NULL_PTR),
         root_(NULL_PTR) {}
@@ -325,6 +332,11 @@ class Object {
   inline void SetRoot(fat_ptr root) { volatile_write(root_, root); }
   inline void SetPrev(fat_ptr prev) { volatile_write(prev_, prev); }
 #endif /* HYU_RBTREE */
+
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+  inline fat_ptr GetRoot() { return volatile_read(root_); }
+  inline void SetRoot(fat_ptr root) { volatile_write(root_, root); }
+#endif /* HYU_BPTREE */
 
   fat_ptr GenerateClsnPtr(uint64_t clsn);
   void Pin(

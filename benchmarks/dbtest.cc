@@ -27,7 +27,7 @@ DEFINE_string(benchmark, "tpcc", "Benchmark name: tpcc, tpce, or ycsb");
 DEFINE_string(benchmark_options, "", "Benchmark-specific opetions.");
 DEFINE_uint64(threads, 1, "Number of worker threads to run transactions.");
 DEFINE_uint64(node_memory_gb, 750,
-              "GBs of memory to allocate per node.");  // default is 12
+              "GBs of memory to allocate per node.");  // default is 12 //for eval 750
 DEFINE_bool(numa_spread, false,
             "Whether to pin threads in spread mode (compact if false)");
 DEFINE_string(tmpfs_dir, "/dev/shm",

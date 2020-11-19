@@ -293,11 +293,22 @@ void ConcurrentMasstreeIndex::Get(transaction *t, rc_t &rc, const varstr &key,
 #if defined (HYU_SKIPLIST) /* HYU_SKIPLIST */
             oidmgr->oid_get_version_skiplist(descriptor_->GetTupleArray(), oid,
                                              t->xc);
+        //for debug
+				dbtuple *debug = oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);
+				if (debug != tuple) {
+          Object *debug_obj = debug->GetObject();
+          Object *tuple_obj = tuple->GetObject();
+          //LSN::from_ptr(debug_obj->GetClsn()).offset();
+          printf("consistency error!\n");
+          printf("skiplist: %lu, list: %lu\n",
+             LSN::from_ptr(tuple_obj->GetClsn()).offset(),
+             LSN::from_ptr(debug_obj->GetClsn()).offset());
+        }
 #elif defined (HYU_RBTREE)
             oidmgr->oid_get_version_rbtree(descriptor_->GetTupleArray(), oid,
                                            t->xc);
 				//for debug
-				dbtuple *debug = oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);
+				/*dbtuple *debug = oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);
 				if (debug != tuple) {
           Object *debug_obj = debug->GetObject();
           Object *tuple_obj = tuple->GetObject();
@@ -306,7 +317,7 @@ void ConcurrentMasstreeIndex::Get(transaction *t, rc_t &rc, const varstr &key,
           printf("rbtree: %lu, list: %lu\n",
              LSN::from_ptr(tuple_obj->GetClsn()).offset(),
              LSN::from_ptr(debug_obj->GetClsn()).offset());
-        }
+        }*/
 #else /* HYU_SKIPLIST */
             oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);
 #endif /* HYU_SKIPLIST */
