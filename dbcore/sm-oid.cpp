@@ -999,7 +999,10 @@ install:
     // make sentinel
     size_t size = sizeof(fat_ptr) * SKIPLIST_MAX_LEVEL;
     fat_ptr *sentinel_ptr = (fat_ptr *)MM::allocate(size);
-    memset(sentinel_ptr, 0, size);
+    //memset(sentinel_ptr, 0, size);
+    for (int i = 0; i < SKIPLIST_MAX_LEVEL; i++) {
+      sentinel_ptr[i] = NULL_PTR;
+    }
     size_t size_code = encode_size_aligned(size);
     ASSERT(size_code != INVALID_SIZE_CODE);
     fat_ptr sentinel = fat_ptr::make(sentinel_ptr, size_code, 0);
@@ -1997,11 +2000,12 @@ start_over:
     if (visible) {
       return cur_obj->GetPinnedTuple();
     } else {
-      int lv = 1;
+      int lv = 0;
       //for (lv = level; lv >= 1; lv--) {
       bool temp_visible = true;
       if (cur_lev >= 2) {
         for (lv = cur_lev - 2; lv >= 0; lv--) {
+          if (level - 2 < lv) continue;
           tentative_jump = lv_array[lv];
           if (!tentative_jump.offset()) continue;
           Object *temp_obj = (Object *)tentative_jump.offset();
