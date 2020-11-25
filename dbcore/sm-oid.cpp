@@ -23,9 +23,6 @@
 #ifdef HYU_RBTREE /* HYU_RBTREE */
 #include "sm-common.h"
 #endif /* HYU_RBTREE */
-#ifdef HYU_BPTREE /* HYU_BPTREE */
-#include "BPlusTree.h"
-#endif /* HYU_BPTREE */
 
 namespace ermia {
 sm_oid_mgr *oidmgr = NULL;
@@ -892,6 +889,27 @@ bool sm_oid_mgr::InsertRBtree(struct rb_root *root, rbnode *data) {
 }
 #endif /* HYU_RBTREE */
 
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+void sm_oid_mgr::ExchangeBPTvalue(fat_ptr new_obj, fat_ptr old_obj) {
+  Object *obj = (Object *)new_obj.offset();
+	fat_ptr bpt_root = obj->GetRoot();
+  BPlusTreeRoot *root = (BPlusTreeRoot *)bpt_root.offset();
+  BPlusTreeNode *cur = root->node;
+
+  while(1) {
+    if (cur->isLeaf == true) break;
+    fat_ptr temp_cur = cur->child[cur->key_num - 1];
+    cur = (BPlusTreeNode *)temp_cur.offset();
+  }
+
+  //BPlusTreeNode *node = FindBPTtreeRightmost(root, old_obj);
+  if (cur != NULL)
+    cur->child[cur->key_num - 1] = new_obj;
+  else
+    printf("fail to exchange bpt-tree value\n");
+}
+#endif /* HYU_BPTREE */
+
 fat_ptr sm_oid_mgr::PrimaryTupleUpdate(FID f, OID o, const varstr *value,
                                        TXN::xid_context *updater_xc,
                                        fat_ptr *new_obj_ptr) {
@@ -1066,16 +1084,25 @@ install:
 #endif /* HYU_RBTREE */
 
 #ifdef HYU_BPTREE /* HYU_BPTREE */
+  uint64_t key_root = 0;
   if (old_desc->GetRoot() == NULL_PTR) {
     // make new root
     BPlusTreeRoot *new_bptroot = BPlusTree_Init();
 
-    size_t size_bptcode = encode_size_aligned(sizeof(BplusTreeRoot));
+    size_t size_bptroot = sizeof(BPlusTreeRoot);
+    size_t size_bptcode = encode_size_aligned(size_bptroot);
     ASSERT(size_bptcode != INVALID_SIZE_CODE);
     fat_ptr new_root = fat_ptr::make(new_bptroot, size_bptcode, 0);
 
     if (__sync_bool_compare_and_swap(&old_desc->root_._ptr, 0, new_root._ptr)) {
-      asd
+      sm_tx_log_impl *impl = get_impl(updater_xc->xct->log);
+      //key_root = impl->_commit_block->block->next_lsn()._val;
+      if (old_desc->GetClsn().asi_type() == fat_ptr::ASI_LOG) {
+        key_root = LSN::from_ptr(old_desc->GetClsn()).offset();
+      } else {
+        key_root = impl->_log->_lm._lsn_offset;
+      }
+      BPlusTree_Insert(new_bptroot, key_root, head);
     } else {
       BPT_deallocate(new_bptroot->node);
       MM::deallocate(new_root);
@@ -1112,6 +1139,13 @@ install:
     Object *next = (Object *)old_desc->GetNextVolatile().offset();
     next->SetPrev(*new_obj_ptr);
 #endif /* HYU_RBTREE */
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+    new_object->SetRoot(old_desc->GetRoot());
+    BPlusTreeRoot *bptroot = (BPlusTreeRoot *)old_desc->GetRoot().offset();
+    bptroot->BPTreeLockAcquire();
+    ExchangeBPTvalue(*new_obj_ptr, head);
+    bptroot->BPTreeLockRelease();
+#endif /* HYU_BPTREE */
     // I already claimed it, no need to use cas then
     volatile_write(ptr->_ptr, new_obj_ptr->_ptr);
     __sync_synchronize();
@@ -1185,6 +1219,9 @@ install:
 #ifdef HYU_RBTREE /* HYU_RBTREE */
     new_object->SetRoot(old_desc->GetRoot());
 #endif /* HYU_RBTREE */
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+    new_object->SetRoot(old_desc->GetRoot());
+#endif /* HYU_BPTREE */
 
     if (__sync_bool_compare_and_swap(&ptr->_ptr, head._ptr,
                                      new_obj_ptr->_ptr)) {
@@ -1202,6 +1239,17 @@ install:
       bool submit = InsertRBtree(rbroot, new_rbnode);
       rbroot->TreeLockRelease();
 #endif /* HYU_RBTREE */
+
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+      BPlusTreeRoot *bptroot = (BPlusTreeRoot *)new_object->GetRoot().offset();
+      sm_tx_log_impl *impl = get_impl(updater_xc->xct->log);
+      //uint64_t key = impl->_commit_block->block->next_lsn()._val;
+      uint64_t key = impl->_log->_lm._lsn_offset;
+      if (key_root == key) key++;
+      bptroot->BPTreeLockAcquire();
+      bool submit = BPlusTree_Insert(bptroot, key, *new_obj_ptr);
+      bptroot->BPTreeLockRelease();
+#endif /* HYU_BPTREE */
 
 #ifdef HYU_VWEAVER /* HYU_VWEAVER */
 #ifdef HYU_EVAL    /* HYU_EVAL */
@@ -2286,6 +2334,95 @@ start_over:
 }
 
 #endif /* HYU_RBTREE */
+
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+// For tuple arrays only, i.e., entries are guaranteed to point to Objects.
+dbtuple *sm_oid_mgr::oid_get_version_bptree(oid_array *oa, OID o,
+                                     TXN::xid_context *visitor_xc) {
+  fat_ptr *entry = oa->get(o);
+start_over:
+  fat_ptr ptr = volatile_read(*entry);
+  ASSERT(ptr.asi_type() == 0);
+  Object *prev_obj = nullptr;
+
+  if (ptr.offset()) {
+  //while (ptr.offset()) {
+    Object *cur_obj = nullptr;
+    BPlusTreeRoot *root = nullptr;
+    BPlusTreeNode *cur = nullptr;
+    uint64_t key = visitor_xc->begin;
+    // Must read next_ before reading cur_obj->_clsn:
+    // the version we're currently reading (ie cur_obj) might be unlinked
+    // and thus recycled by the memory allocator at any time if it's not
+    // a committed version. If so, cur_obj->_next will be pointing to some
+    // other object in the allocator's free object pool - we'll probably
+    // end up at la-la land if we followed this _next pointer value...
+    // Here we employ some flavor of OCC to solve this problem:
+    // the aborting transaction that will unlink cur_obj will update
+    // cur_obj->_clsn to NULL_PTR, then deallocate(). Before reading
+    // cur_obj->_clsn, we (as the visitor), first dereference pp to get
+    // a stable value that "should" contain the right address of the next
+    // version. We then read cur_obj->_clsn to verify: if it's NULL_PTR
+    // that means we might have read a wrong _next value that's actually
+    // pointing to some irrelevant object in the allocator's memory pool,
+    // hence must start over from the beginning of the version chain.
+    fat_ptr tentative_next = NULL_PTR;
+    fat_ptr temp_ptr = NULL_PTR;
+    Object *temp_obj = nullptr;
+    // If this is a backup server, then must see persistent_next to find out
+    // the **real** overwritten version.
+    if (config::is_backup_srv() && !config::command_log) {
+      oid_get_version_backup(ptr, tentative_next, prev_obj, cur_obj,
+                             visitor_xc);
+    } else {
+      ASSERT(ptr.asi_type() == 0);
+      cur_obj = (Object *)ptr.offset();
+      tentative_next = cur_obj->GetNextVolatile();
+      root = (BPlusTreeRoot *)cur_obj->GetRoot().offset();
+      ASSERT(tentative_next.asi_type() == 0);
+    }
+
+    bool retry = false;
+    bool visible = TestVisibility(cur_obj, visitor_xc, retry);
+    if (retry) {
+      goto start_over;
+    }
+    if (visible) {
+      return cur_obj->GetPinnedTuple();
+    } else {
+      cur = Find(root, key, false);
+      int idx = Binary_Search(cur, key);
+//next_leaf:
+      //int idx = 0;
+      //while(idx < cur->key_num) {
+      while(idx >= 0) {
+        temp_ptr = cur->child[idx];
+        temp_obj = (Object *)temp_ptr.offset();
+        bool temp_retry = false;
+        bool temp_visible = TestVisibility(temp_obj, visitor_xc, temp_retry);
+
+        if (temp_retry) {
+          goto start_over;
+        }
+        if (temp_visible) {
+          return temp_obj->GetPinnedTuple();
+        } else {
+          //return nullptr;
+        }
+        idx--;
+      }
+      //cur = cur->next;
+      //idx = 0;
+      //goto next_leaf;
+    }
+    //ptr = tentative_next;
+    //prev_obj = cur_obj;
+  }
+
+  return nullptr;  // No Visible records
+}
+
+#endif /* HYU_BPTREE */
 
 // For tuple arrays only, i.e., entries are guaranteed to point to Objects.
 dbtuple *sm_oid_mgr::oid_get_version(oid_array *oa, OID o,

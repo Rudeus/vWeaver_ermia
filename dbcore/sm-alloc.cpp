@@ -391,6 +391,10 @@ void deallocate(fat_ptr p) {
   obj->SetRoot(NULL_PTR);
   obj->SetPrev(NULL_PTR);
 #endif /* HYU_RBTREE */
+
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+  obj->SetRoot(NULL_PTR);
+#endif /* HYU_BPTREE */
   if (!tls_free_object_pool) {
     tls_free_object_pool = new TlsFreeObjectPool;
   }
@@ -436,13 +440,21 @@ void deallocate_bpt(fat_ptr p) {
   del_node->isRoot = false;
   del_node->isLeaf = false;
   del_node->key_num = 0;
-  memset(del_node->key, 0, sizeof(int) * MAX_CHILD_NUMBER);
-  memset(del_node->pos, 0, sizeof(int) * MAX_CHILD_NUMBER);
-  memset(del_node->child, nullptr, sizeof(void*) * MAX_CHILD_NUMBER);
+  memset(del_node->key, 0, sizeof(int64_t) * MAX_CHILD_NUMBER);
+  memset(del_node->child, 0, sizeof(fat_ptr) * MAX_CHILD_NUMBER);
   del_node->father = nullptr;
   del_node->next = nullptr;
   del_node->last = nullptr;
   TotalNodes--;
+}
+
+void deallocate_root(fat_ptr p) {
+  ASSERT(p != NULL_PTR);
+  ASSERT(p.size_code());
+  ASSERT(p.size_code() != INVALID_SIZE_CODE);
+  BPlusTreeRoot *del_node = (BPlusTreeRoot *)p.offset();
+  del_node->node = nullptr;
+  del_node->bpt_lock = false;
 }
 #endif /* HYU_BPTREE */
 

@@ -116,6 +116,10 @@ void deallocate_skiplist(fat_ptr p);
 #ifdef HYU_RBTREE /* HYU_RBTREE */
 void deallocate_rb(fat_ptr p);
 #endif /* HYU_RBTREE */
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+void deallocate_bpt(fat_ptr p);
+void deallocate_root(fat_ptr p);
+#endif /* HYU_BPTREE */
 void *allocate_onnode(size_t size);
 epoch_mgr::tls_storage *get_tls(void *);
 void global_init(void *);

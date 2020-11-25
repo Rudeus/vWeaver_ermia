@@ -4,7 +4,7 @@
 #include "sm-common.h"
 #include "sm-log.h"
 #include "sm-oid-alloc-impl.h"
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_RBTREE)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_RBTREE) || defined(HYU_BPTREE)
 #include "sm-alloc.h"
 #endif
 
@@ -195,6 +195,12 @@ struct sm_oid_mgr {
   bool InsertRBtree(struct rb_root *root, rbnode *data);
 #endif /* HYU_RBTREE */
 
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+  void ExchangeBPTvalue(fat_ptr new_obj, fat_ptr old_obj);
+  //void Split(BPlusTreeNode* Cur);
+  //void Insert(BPlusTreeNode* Cur, uint64_t key, fat_ptr value, BPlusTreeRoot* Root);
+#endif /* HYU_BPTREE */
+
   /* Return a fat_ptr to the overwritten object (could be an in-flight version!)
    */
   fat_ptr PrimaryTupleUpdate(FID f, OID o, const varstr *value,
@@ -256,6 +262,11 @@ struct sm_oid_mgr {
   dbtuple *oid_get_version_rbtree(oid_array *oa, OID o,
                                   TXN::xid_context *visitor_xc);
 #endif /* HYU_RBTREE */
+
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+  dbtuple *oid_get_version_bptree(oid_array *oa, OID o,
+                                  TXN::xid_context *visitor_xc);
+#endif /* HYU_BPTREE */
 
   void oid_get_version_backup(fat_ptr &ptr, fat_ptr &tentative_next,
                               Object *prev_obj, Object *&cur_obj,
@@ -352,6 +363,7 @@ struct sm_oid_mgr {
       MM::deallocate(head_obj->GetRoot());
     }
 #endif /* HYU_RBTREE */
+
     __sync_synchronize();
     // tzwang: The caller is responsible for deallocate() the head version
     // got unlinked - a update of own write will record the unlinked version

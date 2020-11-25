@@ -205,6 +205,17 @@ void transaction::Abort() {
       rb_deallocate(data);
     }
 #endif /* HYU_RBTREE */
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+    BPlusTreeRoot *bpt_root = (BPlusTreeRoot *)obj->GetRoot().offset();
+    /*if (bpt_root) {
+      bpt_root->BPTreeLockAcquire();
+      Delete_Rightmost(bpt_root);
+      bpt_root->BPTreeLockRelease();
+    }
+    if (obj->GetRoot() != NULL_PTR && obj->GetNextVolatile() == NULL_PTR) {
+      MM::deallocate_root(obj->GetRoot());
+    }*/
+#endif /* HYU_BPTREE */
     MM::deallocate(entry);
   }
 

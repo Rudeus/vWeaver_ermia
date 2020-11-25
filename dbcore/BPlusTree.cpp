@@ -54,7 +54,7 @@ void BPT_deallocate(void *p) {
 }
 
 /** Binary search to find the biggest child l that Cur->key[l] <= key */
-inline int Binary_Search(BPlusTreeNode* Cur, int key) {
+inline int Binary_Search(BPlusTreeNode* Cur, int64_t key) {
 	int l = 0, r = Cur->key_num;
 	if (key < Cur->key[l]) return l;
 	if (Cur->key[r - 1] <= key) return r - 1;
@@ -75,8 +75,8 @@ inline int Binary_Search(BPlusTreeNode* Cur, int key) {
  * where Mid = MaxChildNumber / 2
  * Note that only when Split() is called, a new Node is created
  */
-void Insert(BPlusTreeNode*, int, int, void*);
-void Split(BPlusTreeNode* Cur) {
+void Insert(BPlusTreeNode*, int64_t, ermia::fat_ptr, BPlusTreeRoot*);
+void Split(BPlusTreeNode* Cur, BPlusTreeRoot* Root) {
 	// copy Cur(Mid .. MaxChildNumber) -> Temp(0 .. Temp->key_num)
 	BPlusTreeNode* Temp = New_BPlusTreeNode();
 	BPlusTreeNode* ch;
@@ -88,9 +88,9 @@ void Split(BPlusTreeNode* Cur) {
 		Temp->child[i - Mid] = Cur->child[i];
 		Temp->key[i - Mid] = Cur->key[i];
 		if (Temp->isLeaf) {
-			Temp->pos[i - Mid] = Cur->pos[i];
+			//Temp->pos[i - Mid] = Cur->pos[i];
 		} else {
-			ch = (BPlusTreeNode*)Temp->child[i - Mid];
+			ch = (BPlusTreeNode*)Temp->child[i - Mid].offset();
 			ch->father = Temp;
 		}
 	}
@@ -100,12 +100,14 @@ void Split(BPlusTreeNode* Cur) {
 	if (Cur->isRoot) {
 		// Create a new Root, the depth of Tree is increased
 		BPlusTreeNode *new_root = New_BPlusTreeNode();
+    size_t size_node = sizeof(BPlusTreeNode);
+    size_t size_code = encode_size_aligned(size_node);
 		new_root->key_num = 2;
 		new_root->isRoot = true;
 		new_root->key[0] = Cur->key[0];
-		new_root->child[0] = Cur;
+		new_root->child[0] = ermia::fat_ptr::make(Cur, size_code, 0);
 		new_root->key[1] = Temp->key[0];
-		new_root->child[1] = Temp;
+		new_root->child[1] = ermia::fat_ptr::make(Temp, size_code, 0);
 		Cur->father = Temp->father = Root;
 		Cur->isRoot = false;
 		Root->node = new_root;
@@ -117,31 +119,32 @@ void Split(BPlusTreeNode* Cur) {
 	} else {
 		// Try to insert Temp to Cur->father
 		Temp->father = Cur->father;
-		Insert(Cur->father, Cur->key[Mid], (void*)Temp, Root);
+    size_t size_node = sizeof(BPlusTreeNode);
+    size_t size_code = encode_size_aligned(size_node);
+		Insert(Cur->father, Cur->key[Mid], ermia::fat_ptr::make(Temp, size_code, 0), Root);
 	}
 }
 
 /** Insert (key, value) into Cur, if Cur is full, then split it to fit the definition of B+tree */
 void Insert(BPlusTreeNode* Cur, uint64_t key, ermia::fat_ptr value, BPlusTreeRoot* Root) {
 	int i, ins;
-	if (key < Cur->key[0]) ins = 0; else ins = Binary_Search(Cur, key) + 1;
-	for (i = Cur->key_num; i > ins; i--) {
-		Cur->key[i] = Cur->key[i - 1];
-		Cur->child[i] = Cur->child[i - 1];
-		if (Cur->isLeaf) Cur->pos[i] = Cur->pos[i - 1];
-	}
+	//if (key < Cur->key[0]) ins = 0; else ins = Binary_Search(Cur, key) + 1;
+	//for (i = Cur->key_num; i > ins; i--) {
+		//Cur->key[i] = Cur->key[i - 1];
+		//Cur->child[i] = Cur->child[i - 1];
+	//}
+	ins = Cur->key_num;
 	Cur->key_num++;
 	Cur->key[ins] = key;
 	Cur->child[ins] = value;
-	Cur->pos[ins] = pos;
 	if (Cur->isLeaf == false) { // make links on leaves
-		BPlusTreeNode* firstChild = (BPlusTreeNode*)(Cur->child[0]);
+		BPlusTreeNode* firstChild = (BPlusTreeNode*)(Cur->child[0].offset());
 		if (firstChild->isLeaf == true) { // which means value is also a leaf as child[0]	
-			BPlusTreeNode* temp = (BPlusTreeNode*)(value);
+			BPlusTreeNode* temp = (BPlusTreeNode*)(value.offset());
 			if (ins > 0) {
 				BPlusTreeNode* prevChild;
 				BPlusTreeNode* succChild;
-				prevChild = (BPlusTreeNode*)Cur->child[ins - 1];
+				prevChild = (BPlusTreeNode*)Cur->child[ins - 1].offset();
 				succChild = prevChild->next;
 				prevChild->next = temp;
 				temp->next = succChild;
@@ -150,7 +153,7 @@ void Insert(BPlusTreeNode* Cur, uint64_t key, ermia::fat_ptr value, BPlusTreeRoo
 			} else {
 				// do not have a prevChild, then refer next directly
 				// updated: the very first record on B+tree, and will not come to this case
-				temp->next = Cur->child[1];
+				temp->next = (BPlusTreeNode *)Cur->child[1].offset();
 				//printf("this happens\n");
 			}
 		}
@@ -218,7 +221,7 @@ void Resort(BPlusTreeNode* Left, BPlusTreeNode* Right) {
  * (4) merge with left brother
  * in that case root has only one child, set this chil to be root
  */
-void Delete(BPlusTreeNode*, int);
+void Delete(BPlusTreeNode*, int64_t);
 void Redistribute(BPlusTreeNode* Cur) {
 	if (Cur->isRoot) {
 		if (Cur->key_num == 1 && !Cur->isLeaf) {
@@ -288,7 +291,7 @@ void Redistribute(BPlusTreeNode* Cur) {
 }
 
 /** Delete key from Cur, if no. of children < MaxChildNUmber / 2, resort or merge it with brothers */
-void Delete(BPlusTreeNode* Cur, int key) {
+void Delete(BPlusTreeNode* Cur, int64_t key) {
 	int i, del = Binary_Search(Cur, key);
 	void* delChild = Cur->child[del];
 	for (i = del; i < Cur->key_num - 1; i++) {
@@ -329,16 +332,19 @@ void Delete(BPlusTreeNode* Cur, int key) {
  *	modify indicates whether key should affect the tree
  */
 BPlusTreeNode* Find(BPlusTreeRoot *Root, uint64_t key, int modify) {
-	BPlusTreeNode* Cur = Root;
+	BPlusTreeNode* Cur = Root->node;
+  ermia::fat_ptr temp_cur = NULL_PTR;
 	while (1) {
 		if (Cur->isLeaf == true)
 			break;
 		if (key < Cur->key[0]) {
 			if (modify == true) Cur->key[0] = key;
-			Cur = Cur->child[0];
+			temp_cur = Cur->child[0];
+			Cur = (BPlusTreeNode *)temp_cur.offset();
 		} else {
 			int i = Binary_Search(Cur, key);
-			Cur = Cur->child[i];
+			temp_cur = Cur->child[i];
+			Cur = (BPlusTreeNode *)temp_cur.offset();
 		}
 	}
 	return Cur;
@@ -374,14 +380,14 @@ void Print(BPlusTreeNode* Cur) {
 /** Interface: Insert (key, value) into B+tree */
 int BPlusTree_Insert(BPlusTreeRoot *Root, uint64_t key, ermia::fat_ptr value) {
 	BPlusTreeNode* Leaf = Find(Root, key, true);
-	int i = Binary_Search(Leaf, key);
-	if (Leaf->key[i] == key) return false;
+	//int i = Binary_Search(Leaf, key);
+	//if (Leaf->key[i] == key) return false;
 	Insert(Leaf, key, pos, value, Root);
 	return true;
 }
 
 /** Interface: query all record whose key satisfy that key = query_key */
-void BPlusTree_Query_Key(int key) {
+void BPlusTree_Query_Key(int64_t key) {
 	BPlusTreeNode* Leaf = Find(key, false);
 	QueryAnsNum = 0;
 	int i;
@@ -396,7 +402,7 @@ void BPlusTree_Query_Key(int key) {
 }
 
 /** Interface: query all record whose key satisfy that query_l <= key <= query_r */
-void BPlusTree_Query_Range(int l, int r) {
+void BPlusTree_Query_Range(int64_t l, int64_t r) {
 	BPlusTreeNode* Leaf = Find(l, false);
 	QueryAnsNum = 0;
 	int i;
@@ -424,7 +430,7 @@ void BPlusTree_Query_Range(int l, int r) {
 }
 
 /** Interface: Find the position of given key */
-int BPlusTree_Find(int key) {
+int BPlusTree_Find(int64_t key) {
 	BPlusTreeNode* Leaf = Find(key, false);
 	int i = Binary_Search(Leaf, key);
 	if (Leaf->key[i] != key) return -1; // don't have this key
@@ -432,7 +438,7 @@ int BPlusTree_Find(int key) {
 }
 
 /** Interface: modify value on the given key */
-void BPlusTree_Modify(int key, void* value) {
+void BPlusTree_Modify(int64_t key, ermia::fat_ptr value) {
 	BPlusTreeNode* Leaf = Find(key, false);
 	int i = Binary_Search(Leaf, key);
 	if (Leaf->key[i] != key) return; // don't have this key
@@ -442,7 +448,7 @@ void BPlusTree_Modify(int key, void* value) {
 }
 
 /** Interface: delete value on the given key */
-void BPlusTree_Delete(int key) {
+void BPlusTree_Delete(int64_t key) {
 	BPlusTreeNode* Leaf = Find(key, false);
 	int i = Binary_Search(Leaf, key);
 	if (Leaf->key[i] != key) return; // don't have this key
@@ -460,7 +466,7 @@ void BPlusTree_Destroy() {
 }
 
 /** Interface: Initialize */
-BPlusTreeNode *BPlusTree_Init() {
+BPlusTreeRoot *BPlusTree_Init() {
 	BPlusTree_Destroy();
 	Root = New_BPlusTreeRoot();
 	Root->isRoot = true;

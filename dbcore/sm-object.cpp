@@ -475,6 +475,428 @@ void rb_replace_node(struct rb_node *victim, struct rb_node *new_node,
 }
 #endif /* HYU_RBTREE */
 
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+#define true 1
+#define false 0
+
+int MaxChildNumber = 128;
+uint64_t TotalNodes;
+
+int QueryAnsNum;
+
+/** Create a new B+tree Node */
+BPlusTreeNode* New_BPlusTreeNode() {
+  size_t size_node = sizeof(BPlusTreeNode);
+	BPlusTreeNode* p = (BPlusTreeNode*)MM::allocate(size_node);
+	p->isRoot = false;
+	p->isLeaf = false;
+	p->key_num = 0;
+	p->child[0] = NULL_PTR;
+	p->father = NULL;
+	p->next = NULL;
+	p->last = NULL;
+	TotalNodes++;
+	return p;
+}
+
+/** Create a new B+tree Root */
+BPlusTreeRoot* New_BPlusTreeRoot() {
+  size_t size_root = sizeof(BPlusTreeRoot);
+	BPlusTreeRoot* r = (BPlusTreeRoot*)MM::allocate(size_root);
+	size_t size_node = sizeof(BPlusTreeNode);
+	BPlusTreeNode* p = (BPlusTreeNode*)MM::allocate(size_node);
+	p->isRoot = false;
+	p->isLeaf = false;
+	p->key_num = 0;
+	p->child[0] = NULL_PTR;
+	p->father = NULL;
+	p->next = NULL;
+	p->last = NULL;
+	r->node = p;
+	r->bpt_lock = false;
+	TotalNodes++;
+	return r;
+}
+
+void BPT_deallocate(void *p) {
+  size_t size = sizeof(struct BPlusTreeNode);
+  size_t size_code = encode_size_aligned(size);
+  MM::deallocate_bpt(fat_ptr::make(p, size_code));
+}
+
+/** Binary search to find the biggest child l that Cur->key[l] <= key */
+int Binary_Search(BPlusTreeNode* Cur, uint64_t key) {
+	int l = 0, r = Cur->key_num;
+	if (key < Cur->key[l]) return l;
+	if (Cur->key[r - 1] <= key) return r - 1;
+	while (l < r - 1) {
+		int mid = (l + r) >> 1;
+		if (Cur->key[mid] > key)
+			r = mid;
+		else
+			l = mid;
+	}
+	return l;
+}
+
+/**
+ * Cur(MaxChildNumber) split into two part:
+ *	(1) Cur(0 .. Mid - 1) with original key
+ *	(2) Temp(Mid .. MaxChildNumber) with key[Mid]
+ * where Mid = MaxChildNumber / 2
+ * Note that only when Split() is called, a new Node is created
+ */
+//void Insert(BPlusTreeNode*, int64_t, fat_ptr, BPlusTreeRoot*);
+void Split(BPlusTreeNode* Cur, BPlusTreeRoot* Root) {
+	// copy Cur(Mid .. MaxChildNumber) -> Temp(0 .. Temp->key_num)
+	BPlusTreeNode* Temp = New_BPlusTreeNode();
+	BPlusTreeNode* ch;
+	int Mid = MaxChildNumber >> 1;
+	Temp->isLeaf = Cur->isLeaf; // Temp's depth == Cur's depth
+	Temp->key_num = MaxChildNumber - Mid;
+	int i;
+	for (i = Mid; i < MaxChildNumber; i++) {
+		Temp->child[i - Mid] = Cur->child[i];
+		Temp->key[i - Mid] = Cur->key[i];
+		if (Temp->isLeaf) {
+			//Temp->pos[i - Mid] = Cur->pos[i];
+		} else {
+			ch = (BPlusTreeNode*)Temp->child[i - Mid].offset();
+			ch->father = Temp;
+		}
+	}
+	// Change Cur
+	Cur->key_num = Mid;
+	// Insert Temp
+	if (Cur->isRoot) {
+		// Create a new Root, the depth of Tree is increased
+		BPlusTreeNode *new_root = New_BPlusTreeNode();
+    size_t size_node = sizeof(BPlusTreeNode);
+    size_t size_code = encode_size_aligned(size_node);
+		new_root->key_num = 2;
+		new_root->isRoot = true;
+		new_root->key[0] = Cur->key[0];
+		new_root->child[0] = fat_ptr::make(Cur, size_code, 0);
+		new_root->key[1] = Temp->key[0];
+		new_root->child[1] = fat_ptr::make(Temp, size_code, 0);
+		Cur->father = Temp->father = new_root;
+		Cur->isRoot = false;
+		Root->node = new_root;
+
+		if (Cur->isLeaf) {
+			Cur->next = Temp;
+			Temp->last = Cur;
+		}
+	} else {
+		// Try to insert Temp to Cur->father
+		Temp->father = Cur->father;
+    size_t size_node = sizeof(BPlusTreeNode);
+    size_t size_code = encode_size_aligned(size_node);
+		Insert(Cur->father, Cur->key[Mid], fat_ptr::make(Temp, size_code, 0), Root);
+	}
+}
+
+/** Insert (key, value) into Cur, if Cur is full, then split it to fit the definition of B+tree */
+void Insert(BPlusTreeNode* Cur, uint64_t key, fat_ptr value, BPlusTreeRoot* Root) {
+	int i, ins;
+	//if (key < Cur->key[0]) ins = 0; else ins = Binary_Search(Cur, key) + 1;
+	//for (i = Cur->key_num; i > ins; i--) {
+		//Cur->key[i] = Cur->key[i - 1];
+		//Cur->child[i] = Cur->child[i - 1];
+	//}
+	ins = Cur->key_num;
+	Cur->key_num++;
+	Cur->key[ins] = key;
+	Cur->child[ins] = value;
+	if (Cur->isLeaf == false) { // make links on leaves
+		BPlusTreeNode* firstChild = (BPlusTreeNode*)(Cur->child[0].offset());
+		if (firstChild->isLeaf == true) { // which means value is also a leaf as child[0]	
+			BPlusTreeNode* temp = (BPlusTreeNode*)(value.offset());
+			if (ins > 0) {
+				BPlusTreeNode* prevChild;
+				BPlusTreeNode* succChild;
+				prevChild = (BPlusTreeNode*)Cur->child[ins - 1].offset();
+				succChild = prevChild->next;
+				prevChild->next = temp;
+				temp->next = succChild;
+				temp->last = prevChild;
+				if (succChild != NULL) succChild->last = temp;
+			} else {
+				// do not have a prevChild, then refer next directly
+				// updated: the very first record on B+tree, and will not come to this case
+				temp->next = (BPlusTreeNode *)Cur->child[1].offset();
+				//printf("this happens\n");
+			}
+		}
+	}
+	if (Cur->key_num == MaxChildNumber) // children is full
+		Split(Cur, Root);
+}
+
+/** Resort(Give, Get) make their no. of children average */
+void Resort(BPlusTreeNode* Left, BPlusTreeNode* Right) {
+	int total = Left->key_num + Right->key_num;
+	BPlusTreeNode* temp;
+	if (Left->key_num < Right->key_num) {
+		int leftSize = total >> 1;
+		int i = 0, j = 0;
+		while (Left->key_num < leftSize) {
+			Left->key[Left->key_num] = Right->key[i];
+			Left->child[Left->key_num] = Right->child[i];
+			if (!Left->isLeaf) {
+				temp = (BPlusTreeNode*)Right->child[i].offset();
+				temp->father = Left;
+			}
+			Left->key_num++;
+			i++;
+		}
+		while (i < Right->key_num) {
+			Right->key[j] = Right->key[i];
+			Right->child[j] = Right->child[i];
+			i++;
+			j++;
+		}
+		Right->key_num = j; 
+	} else {
+		int leftSize = total >> 1;
+		int i, move = Left->key_num - leftSize, j = 0;
+		for (i = Right->key_num - 1; i >= 0; i--) {
+			Right->key[i + move] = Right->key[i];
+			Right->child[i + move] = Right->child[i];
+		}
+		for (i = leftSize; i < Left->key_num; i++) {
+			Right->key[j] = Left->key[i];
+			Right->child[j] = Left->child[i];
+			if (!Right->isLeaf) {
+				temp = (BPlusTreeNode*)Left->child[i].offset();
+				temp->father = Right;
+			}
+			j++;
+		}
+		Left->key_num = leftSize;
+		Right->key_num = total - leftSize;
+	}
+}
+
+/**
+ * Redistribute Cur, using following strategy:
+ * (1) resort with right brother
+ * (2) resort with left brother
+ * (3) merge with right brother
+ * (4) merge with left brother
+ * in that case root has only one child, set this chil to be root
+ */
+void Redistribute(BPlusTreeRoot* Root, BPlusTreeNode* Cur) {
+	if (Cur->isRoot) {
+		if (Cur->key_num == 1 && !Cur->isLeaf) {
+			Root->node = Cur->child[0];
+			Root->node->isRoot = true;
+			BPT_deallocate(Cur);
+			//free(Cur);
+		}
+		return;
+	}
+	BPlusTreeNode* Father = Cur->father;
+	BPlusTreeNode* prevChild;
+	BPlusTreeNode* succChild;
+	BPlusTreeNode* temp;
+	int my_index = Binary_Search(Father, Cur->key[0]);
+	if (my_index + 1 < Father->key_num) {
+		succChild = (BPlusTreeNode *)Father->child[my_index + 1].offset();
+		if ((succChild->key_num - 1) * 2 >= MaxChildNumber) { // at least can move one child to Cur
+			Resort(Cur, succChild); // (1) resort with right child
+			Father->key[my_index + 1] = succChild->key[0];
+			return;
+		}
+	}
+	if (my_index - 1 >= 0) {
+		prevChild = (BPlusTreeNode *)Father->child[my_index - 1].offset();
+		if ((prevChild->key_num - 1) * 2 >= MaxChildNumber) {
+			Resort(prevChild, Cur); // (2) resort with left child
+			Father->key[my_index] = Cur->key[0];
+			return;
+		}
+	}
+	if (my_index + 1 < Father->key_num) { // (3) merge with right child
+		int i = 0;
+		while (i < succChild->key_num) {
+			Cur->key[Cur->key_num] = succChild->key[i];
+			Cur->child[Cur->key_num] = succChild->child[i];
+			if (!Cur->isLeaf) {
+				temp = (BPlusTreeNode*)succChild->child[i].offset();
+				temp->father = Cur;
+			}
+			Cur->key_num++;
+			i++;
+		}
+		Delete(Root, Father, succChild->key[0]); // delete right child
+		return;
+	}
+	if (my_index - 1 >= 0) { // (4) merge with left child
+		int i = 0;
+		while (i < Cur->key_num) {
+			prevChild->key[prevChild->key_num] = Cur->key[i];
+			prevChild->child[prevChild->key_num] = Cur->child[i];
+			if (!Cur->isLeaf) {
+				temp = (BPlusTreeNode*)Cur->child[i].offset();
+				temp->father = prevChild;
+			}
+			prevChild->key_num++;
+			i++;
+		}
+		Delete(Root, Father, Cur->key[0]); // delete left child
+		return;
+	}
+	printf("What?! you're the only child???\n"); // this won't happen
+}
+
+/** Delete Rightmost key */
+void Delete_Rightmost(BPlusTreeRoot* Root) {
+  // find code start
+  BPlusTreeNode* Cur = Root->node;
+  fat_ptr temp_cur = NULL_PTR;
+  while (1) {
+    if (Cur->isLeaf == true)
+      break;
+    temp_cur = Cur->child[Cur->key_num - 1];
+    Cur = (BPlusTreeNode *)temp_cur.offset();
+  }
+	// find code end
+
+  int del = Cur->key_num - 1;
+  int i;
+	fat_ptr delChild_fat = Cur->child[del];
+  BPlusTreeNode* delChild = (BPlusTreeNode *)delChild_fat.offset();
+	for (i = del; i < Cur->key_num - 1; i++) {
+		Cur->key[i] = Cur->key[i + 1];
+		Cur->child[i] = Cur->child[i + 1];
+	}
+	Cur->key_num--;
+	if (Cur->isLeaf == false) { // make links on leaves
+		BPlusTreeNode* firstChild = (BPlusTreeNode*)(Cur->child[0].offset());
+		if (firstChild->isLeaf == true) { // which means delChild is also a leaf
+			BPlusTreeNode* temp = delChild;
+			BPlusTreeNode* prevChild = temp->last;
+			BPlusTreeNode* succChild = temp->next;
+			if (prevChild != NULL) prevChild->next = succChild;
+			if (succChild != NULL) succChild->last = prevChild;
+		}
+	}
+	if (del == 0 && !Cur->isRoot) { // some fathers' key should be changed
+		BPlusTreeNode* temp = Cur;
+		while (!temp->isRoot && temp == (BPlusTreeNode *)temp->father->child[0].offset()) {
+			temp->father->key[0] = Cur->key[0];
+			temp = temp->father;
+		}
+		if (!temp->isRoot) {
+			temp = temp->father;
+			int i = Binary_Search(temp, Cur->key[0]);
+			temp->key[i] = Cur->key[0];
+		}
+	}
+	BPT_deallocate(delChild);
+	//free(delChild);
+	if (Cur->key_num * 2 < MaxChildNumber)
+		Redistribute(Root, Cur);
+}
+
+/** Delete key from Cur, if no. of children < MaxChildNUmber / 2, resort or merge it with brothers */
+void Delete(BPlusTreeRoot* Root, BPlusTreeNode* Cur, uint64_t key) {
+	int i, del = Binary_Search(Cur, key);
+	BPlusTreeNode* delChild = (BPlusTreeNode *)Cur->child[del].offset();
+	for (i = del; i < Cur->key_num - 1; i++) {
+		Cur->key[i] = Cur->key[i + 1];
+		Cur->child[i] = Cur->child[i + 1];
+	}
+	Cur->key_num--;
+	if (Cur->isLeaf == false) { // make links on leaves
+		BPlusTreeNode* firstChild = (BPlusTreeNode*)Cur->child[0].offset();
+		if (firstChild->isLeaf == true) { // which means delChild is also a leaf
+			BPlusTreeNode* temp = (BPlusTreeNode*)delChild;
+			BPlusTreeNode* prevChild = temp->last;
+			BPlusTreeNode* succChild = temp->next;
+			if (prevChild != NULL) prevChild->next = succChild;
+			if (succChild != NULL) succChild->last = prevChild;
+		}
+	}
+	if (del == 0 && !Cur->isRoot) { // some fathers' key should be changed
+		BPlusTreeNode* temp = Cur;
+		while (!temp->isRoot && temp == (BPlusTreeNode *)temp->father->child[0].offset()) {
+			temp->father->key[0] = Cur->key[0];
+			temp = temp->father;
+		}
+		if (!temp->isRoot) {
+			temp = temp->father;
+			int i = Binary_Search(temp, key);
+			temp->key[i] = Cur->key[0];
+		}
+	}
+	BPT_deallocate(delChild);
+	//free(delChild);
+	if (Cur->key_num * 2 < MaxChildNumber)
+		Redistribute(Root, Cur);
+}
+
+
+/** Find a leaf node that key lays in it
+ *	modify indicates whether key should affect the tree
+ */
+BPlusTreeNode* Find(BPlusTreeRoot *Root, uint64_t key, int modify) {
+	BPlusTreeNode* Cur = Root->node;
+  fat_ptr temp_cur = NULL_PTR;
+	while (1) {
+		if (Cur->isLeaf == true)
+			break;
+		if (key < Cur->key[0]) {
+			if (modify == true) Cur->key[0] = key;
+			temp_cur = Cur->child[0];
+			Cur = (BPlusTreeNode *)temp_cur.offset();
+		} else {
+			int i = Binary_Search(Cur, key);
+			temp_cur = Cur->child[i];
+			Cur = (BPlusTreeNode *)temp_cur.offset();
+		}
+	}
+	return Cur;
+}
+
+/** Destroy subtree whose root is Cur, By recursion */
+void Destroy(BPlusTreeNode* Cur) {
+	if (Cur->isLeaf == true) {
+		//int i;
+		//for (i = 0; i < Cur->key_num; i++)
+			//free(Cur->child[i]);
+	} else {
+		int i;
+		for (i = 0; i < Cur->key_num; i++)
+			Destroy(Cur->child[i]);
+	}
+	BPT_deallocate(Cur);
+	//free(Cur);
+}
+
+/** Interface: Insert (key, value) into B+tree */
+int BPlusTree_Insert(BPlusTreeRoot *Root, uint64_t key, fat_ptr value) {
+	BPlusTreeNode* Leaf = Find(Root, key, true);
+	//int i = Binary_Search(Leaf, key);
+	//if (Leaf->key[i] == key) return false;
+	Insert(Leaf, key, value, Root);
+	return true;
+}
+
+/** Interface: Initialize */
+BPlusTreeRoot *BPlusTree_Init() {
+	//BPlusTree_Destroy();
+	BPlusTreeRoot *Root = New_BPlusTreeRoot();
+	Root->node->isRoot = true;
+	Root->node->isLeaf = true;
+	TotalNodes = 0;
+
+	return Root;
+}
+
+#endif /* HYU_BPTREE */
+
 // Dig out the payload from the durable log
 // ptr should point to some position in the log and its size_code should refer
 // to only data size (i.e., the size of the payload of dbtuple rounded up).

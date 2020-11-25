@@ -506,8 +506,12 @@ int basic_table<P>::scan_eval(H helper, Str firstkey, bool emit_firstkey,
       if (ermia::config::is_backup_srv()) {
         v = ermia::oidmgr->BackupGetVersion(tuple_array_, pdest_array_, o, xc);
       } else {
-        if (scan_flag == 3)
+        if (scan_flag == 3) //skiplist
           v = ermia::oidmgr->oid_get_version_skiplist(tuple_array_, o, xc);
+        else if (scan_flag == 4) // rbtree
+          v = ermia::oidmgr->oid_get_version_rbtree(tuple_array_, o, xc);
+        else if (scan_flag == 5) // bptree
+          v = ermia::oidmgr->oid_get_version_bptree(tuple_array_, o, xc);
 				else if (scan_flag == 1)  // vridgy_only
           v = ermia::oidmgr->oid_get_version_zigzag(tuple_array_, o, xc);
         else if (scan_flag == 0)  // vanilla
@@ -594,8 +598,21 @@ int basic_table<P>::scan(H helper, Str firstkey, bool emit_firstkey, F &scanner,
       if (ermia::config::is_backup_srv()) {
         v = ermia::oidmgr->BackupGetVersion(tuple_array_, pdest_array_, o, xc);
       } else {
-#ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
+#if defined(HYU_SKIPLIST) /* HYU_SKIPLIST */
         v = ermia::oidmgr->oid_get_version_skiplist(tuple_array_, o, xc);
+#elif defined(HYU_RBTREE)
+        v = ermia::oidmgr->oid_get_version_rbtree(tuple_array_, o, xc);
+#elif defined(HYU_BPTREE)
+        v = ermia::oidmgr->oid_get_version_bptree(tuple_array_, o, xc);
+        ermia::dbtuple *debug = ermia::oidmgr->oid_get_version(tuple_array_, o, xc);
+				if (debug != v) {
+					ermia::Object *debug_obj = debug->GetObject();
+					ermia::Object *tuple_obj = v->GetObject();
+          printf("consistency error!\n");
+          printf("bptree: %p, list: %p\n",
+             v,
+             debug);
+        }
 #else /* HYU_SKIPLIST */
         v = ermia::oidmgr->oid_get_version(tuple_array_, o, xc);
 #endif /* HYU_SKIPLIST */
@@ -646,7 +663,7 @@ int basic_table<P>::scan_eval(Str firstkey, bool emit_firstkey, F &scanner,
                               ermia::TXN::xid_context *xc, threadinfo &ti,
                               bool is_primary_idx, int scan_flag) const {
   // scan_flag	0: vanilla, 1: vridgy_only, 2:vweaver
-  if (scan_flag == 0 || scan_flag == 1 || scan_flag == 3) {
+  if (scan_flag == 0 || scan_flag == 1 || scan_flag == 3 || scan_flag == 4 || scan_flag == 5) {
     return scan_eval(forward_scan_helper(), firstkey, emit_firstkey, scanner,
                      xc, ti, scan_flag);
   } else {

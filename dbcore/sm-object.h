@@ -126,6 +126,56 @@ typedef struct ermia_rbnode {
 }rbnode;
 #endif /* HYU_RBTREE */
 
+#ifdef HYU_BPTREE /* HYU_BPTREE */
+#define MAX_CHILD_NUMBER 128 //default 3200
+
+#if defined(offsetof)
+  #undef offsetof
+  #define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+#else
+  #define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+#endif
+
+typedef struct BPlusTreeNode {
+	int isRoot, isLeaf;
+	int key_num;
+	uint64_t key[MAX_CHILD_NUMBER]; // key: snapshot
+	ermia::fat_ptr child[MAX_CHILD_NUMBER]; // value: object pointer
+	struct BPlusTreeNode* father;
+	struct BPlusTreeNode* next;
+	struct BPlusTreeNode* last;
+} BPlusTreeNode;
+
+typedef struct BPlusTreeRoot {
+	struct BPlusTreeNode* node;
+  bool bpt_lock;
+
+  inline void BPTreeLockAcquire() {
+    while (__sync_lock_test_and_set(&bpt_lock, true)) {
+      pthread_yield();
+    }
+  }
+  inline void BPTreeLockRelease() {
+    bpt_lock = false;
+    __sync_synchronize();
+  }
+} BPlusTreeRoot;
+
+extern uint64_t TotalNodes;
+void BPT_deallocate(void *p);
+int Binary_Search(BPlusTreeNode *Cur, uint64_t key);
+void Split(BPlusTreeNode* Cur, BPlusTreeRoot* Root);
+void Insert(BPlusTreeNode* Cur, uint64_t key, fat_ptr value, BPlusTreeRoot* Root);
+void Resort(BPlusTreeNode* Left, BPlusTreeNode* Right);
+void Redistribute(BPlusTreeRoot* Root, BPlusTreeNode* Cur);
+void Delete_Rightmost(BPlusTreeRoot* Root);
+void Delete(BPlusTreeRoot* Root, BPlusTreeNode* Cur, uint64_t key);
+BPlusTreeNode* Find(BPlusTreeRoot *Root, uint64_t key, int modify);
+void Destroy(BPlusTreeNode* Cur);
+BPlusTreeRoot *BPlusTree_Init();
+int BPlusTree_Insert(BPlusTreeRoot*, uint64_t, fat_ptr);
+#endif /* HYU_BPTREE */
+
 class Object {
  private:
   typedef epoch_mgr::epoch_num epoch_num;
@@ -216,9 +266,12 @@ class Object {
         lv_pointer_(NULL_PTR),
         lv_(0),
         sentinel_(NULL_PTR) {}
-#elif defined(HYU_RBTREE) || defined(HYU_BPTREE)
+#elif defined(HYU_RBTREE)
         clsn_(NULL_PTR),
         prev_(NULL_PTR),
+        root_(NULL_PTR) {}
+#elif defined(HYU_BPTREE)
+        clsn_(NULL_PTR),
         root_(NULL_PTR) {}
 #else /* HYU_SKIPLIST */
         //clsn_(NULL_PTR),
@@ -237,9 +290,12 @@ class Object {
         lv_pointer_(NULL_PTR),
         lv_(0),
         sentinel_(NULL_PTR) {}
-#elif defined(HYU_RBTREE) || defined(HYU_BPTREE)
+#elif defined(HYU_RBTREE)
         clsn_(NULL_PTR),
         prev_(NULL_PTR),
+        root_(NULL_PTR) {}
+#elif defined(HYU_BPTREE)
+        clsn_(NULL_PTR),
         root_(NULL_PTR) {}
 #else /* HYU_SKIPLIST */
         //clsn_(NULL_PTR),
