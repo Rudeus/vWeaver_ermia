@@ -1678,11 +1678,7 @@ rc_t tpcc_worker::txn_delivery() {
     if (count % 100 == 0) {
       printf("\r proceeding.... %lu / 500", count / 100);
     }
-#ifdef HYU_EVAL_OBJ /* HYU_EVAL_OBJ */
     for (int i = 1; i <= 10000; i++) {
-#else /* HYU_EVAL_OBJ */
-    for (int i = 1; i <= 30000; i++) {
-#endif /* HYU_EVAL_OBJ */
       ermia::transaction *txn = db->NewTransaction(0, arena, txn_buf());
       if (!first) {
         first_begin = txn->xc->begin;
@@ -1764,27 +1760,6 @@ rc_t tpcc_worker::txn_delivery() {
       }
     }
     count++;
-    proceed++;
-#ifdef HYU_LONG_CHAIN /* HYU_LONG_CHAIN */
-    if (proceed == 200000) {
-#else  /* HYU_LONG_CHAIN */
-    if (proceed == 50000) {
-#endif /* HYU_LONG_CHAIN */
-      FILE *fp = fopen("zipf_count.data", "w+");
-      FILE *mid_fp = fopen("zipf_mid_count.data", "w+");
-      FILE *uni_fp = fopen("uniform_count.data", "w+");
-      for (int i = 0; i <= 10000; i++) {
-        fprintf(mid_fp, "zipf_count[%d]: %lu\n", i, zipf_mid_count[i]);
-        fflush(mid_fp);
-        fprintf(fp, "zipf_count[%d]: %lu\n", i, zipf_count[i]);
-        fflush(fp);
-        fprintf(uni_fp, "uniform[%d]: %lu\n", i, uniform_count[i]);
-        fflush(uni_fp);
-      }
-      fclose(mid_fp);
-      fclose(fp);
-      fclose(uni_fp);
-    }
   }
   printf("\nfinish create version chain\n");
   return {RC_TRUE};
@@ -2130,17 +2105,12 @@ rc_t tpcc_worker::txn_payment() {
   ermia::transaction *txn = db->NewTransaction(0, arena, txn_buf());
 
   double vanilla_uniform[TIME_PARTITION][RANGE_PARTITION];
-  double vanilla_mid_skew[TIME_PARTITION][RANGE_PARTITION];
-  double vanilla_high_skew[TIME_PARTITION][RANGE_PARTITION];
+
   double skiplist_uniform[TIME_PARTITION][RANGE_PARTITION];
-  double skiplist_mid_skew[TIME_PARTITION][RANGE_PARTITION];
-  double skiplist_high_skew[TIME_PARTITION][RANGE_PARTITION];
-  double vridgy_uniform[TIME_PARTITION][RANGE_PARTITION];
-  double vridgy_mid_skew[TIME_PARTITION][RANGE_PARTITION];
-  double vridgy_high_skew[TIME_PARTITION][RANGE_PARTITION];
-  double vweaver_uniform[TIME_PARTITION][RANGE_PARTITION];
-  double vweaver_mid_skew[TIME_PARTITION][RANGE_PARTITION];
-  double vweaver_high_skew[TIME_PARTITION][RANGE_PARTITION];
+
+  double vridgy_uniform[TIME_PARTITION][RANGE_PARTITION]; // bptree
+
+  double vweaver_uniform[TIME_PARTITION][RANGE_PARTITION]; // rbtree
 
   uint64_t timepoint[TIME_PARTITION];
   uint64_t interval = (txn->xc->begin - first_begin) / TIME_PARTITION;
@@ -2155,7 +2125,7 @@ rc_t tpcc_worker::txn_payment() {
   // 1. vanilla case
   // latency evaluation per version chain length
 
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
+  /*for (int i = TIME_PARTITION - 1; i >= 0; i--) {
     txn->xc->begin = timepoint[i];
     // latency evaluation per scan range
     for (int j = 1; j <= RANGE_PARTITION; j++) {
@@ -2172,14 +2142,14 @@ rc_t tpcc_worker::txn_payment() {
                                        SCAN_VANILLA));
       vanilla_uniform[i][j - 1] = t.lap_ms();
     }
-  }
+  }*/
 
 
   printf("start skiplist uniform scan evaluation\n");
   // 1-1. original skiplist case
   // latency evaluation per version chain length
 
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
+  /*for (int i = TIME_PARTITION - 1; i >= 0; i--) {
     txn->xc->begin = timepoint[i];
     // latency evaluation per scan range
     for (int j = 1; j <= RANGE_PARTITION; j++) {
@@ -2196,10 +2166,10 @@ rc_t tpcc_worker::txn_payment() {
                                        SCAN_SKIPLIST));
       skiplist_uniform[i][j - 1] = t.lap_ms();
     }
-  }
+  }*/
 
-  printf("start vridgy uniform scan evaluation\n");
-  // 2. vridgy_only case
+  printf("start bptree uniform scan evaluation\n");
+  // 2. bptree case
   // latency evaluation per version chain length
 
   for (int i = TIME_PARTITION - 1; i >= 0; i--) {
@@ -2216,16 +2186,16 @@ rc_t tpcc_worker::txn_payment() {
       TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_4)), k_s_4),
                                        &Encode(str(Size(k_s_5)), k_s_5),
                                        s_scanner_2, s_arena_2.get(),
-                                       SCAN_VRIDGY));
+                                       SCAN_BPTREE));
       vridgy_uniform[i][j - 1] = t.lap_ms();
     }
   }
 
-  printf("start vweaver uniform scan evaluation\n");
-  // 3. vweaver case
+  printf("start rbtree uniform scan evaluation\n");
+  // 3. rbtree case
   // latency evaluation per version chain length
 
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
+  /*for (int i = TIME_PARTITION - 1; i >= 0; i--) {
     txn->xc->begin = timepoint[i];
     // latency evaluation per scan range
     for (int j = 1; j <= RANGE_PARTITION; j++) {
@@ -2239,211 +2209,18 @@ rc_t tpcc_worker::txn_payment() {
       TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_6)), k_s_6),
                                        &Encode(str(Size(k_s_7)), k_s_7),
                                        s_scanner_3, s_arena_3.get(),
-                                       SCAN_VWEAVER));
+                                       SCAN_RBTREE));
       vweaver_uniform[i][j - 1] = t.lap_ms();
     }
-  }
-
-  printf("start vanilla zipfian 0.4 scan evaluation\n");
-
-  // 1. vanilla case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_4(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_4(&arena);
-      s_scanner_4.clear();
-      const stock::key k_s_8(1, 10001);
-      const stock::key k_s_9(1, j * RANGE_IN_STOCK + 10000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_8)), k_s_8),
-                                       &Encode(str(Size(k_s_9)), k_s_9),
-                                       s_scanner_4, s_arena_4.get(),
-                                       SCAN_VANILLA));
-      vanilla_mid_skew[i][j - 1] = t.lap_ms();
-    }
-  }
-
-  printf("start skiplist zipfian 0.4 scan evaluation\n");
-  // 1-1. skiplist case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_skip(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_skip(&arena);
-      s_scanner_skip.clear();
-      const stock::key k_s_s(1, 10001);
-      const stock::key k_s_s2(1, j * RANGE_IN_STOCK + 10000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_s)), k_s_s),
-                                       &Encode(str(Size(k_s_s2)), k_s_s2),
-                                       s_scanner_skip, s_arena_skip.get(),
-                                       SCAN_SKIPLIST));
-      skiplist_mid_skew[i][j - 1] = t.lap_ms();
-    }
-  }
-
-  printf("start vridgy zipfian 0.4 scan evaluation\n");
-  // 2. vridgy_only case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_5(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_5(&arena);
-      s_scanner_5.clear();
-      const stock::key k_s_10(1, 10001);
-      const stock::key k_s_11(1, j * RANGE_IN_STOCK + 10000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_10)), k_s_10),
-                                       &Encode(str(Size(k_s_11)), k_s_11),
-                                       s_scanner_5, s_arena_5.get(),
-                                       SCAN_VRIDGY));
-      vridgy_mid_skew[i][j - 1] = t.lap_ms();
-    }
-  }
-
-  printf("start vweaver zipfian 0.4 scan evaluation\n");
-  // 3. vweaver case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_6(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_6(&arena);
-      s_scanner_6.clear();
-      const stock::key k_s_12(1, 10001);
-      const stock::key k_s_13(1, j * RANGE_IN_STOCK + 10000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_12)), k_s_12),
-                                       &Encode(str(Size(k_s_13)), k_s_13),
-                                       s_scanner_6, s_arena_6.get(),
-                                       SCAN_VWEAVER));
-      vweaver_mid_skew[i][j - 1] = t.lap_ms();
-    }
-  }
-
-  printf("start vanilla zipfian 1.4 scan evaluation\n");
-
-  // 1. vanilla case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_9(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_9(&arena);
-      s_scanner_9.clear();
-      const stock::key k_s_14(1, 20001);
-      const stock::key k_s_15(1, j * RANGE_IN_STOCK + 20000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_14)), k_s_14),
-                                       &Encode(str(Size(k_s_15)), k_s_15),
-                                       s_scanner_9, s_arena_9.get(),
-                                       SCAN_VANILLA));
-      vanilla_high_skew[i][j - 1] = t.lap_ms();
-    }
-  }
-
-  printf("start skiplist zipfian 1.4 scan evaluation\n");
-  // 1-1. skiplist case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_skip(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_skip(&arena);
-      s_scanner_skip.clear();
-      const stock::key k_s_s(1, 20001);
-      const stock::key k_s_s2(1, j * RANGE_IN_STOCK + 20000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_s)), k_s_s),
-                                       &Encode(str(Size(k_s_s2)), k_s_s2),
-                                       s_scanner_skip, s_arena_skip.get(),
-                                       SCAN_SKIPLIST));
-      skiplist_high_skew[i][j - 1] = t.lap_ms();
-    }
-  }
-
-  printf("start vridgy zipfian 1.4 scan evaluation\n");
-  // 2. vridgy_only case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_10(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_10(&arena);
-      s_scanner_10.clear();
-      const stock::key k_s_16(1, 20001);
-      const stock::key k_s_17(1, j * RANGE_IN_STOCK + 20000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_16)), k_s_16),
-                                       &Encode(str(Size(k_s_17)), k_s_17),
-                                       s_scanner_10, s_arena_10.get(),
-                                       SCAN_VRIDGY));
-      vridgy_high_skew[i][j - 1] = t.lap_ms();
-    }
-  }
+  }*/
 #endif /* HYU_LONG_CHAIN */
 
-  printf("start vweaver zipfian 1.4 scan evaluation\n");
-  // 3. vweaver case
-  // latency evaluation per version chain length
-
-  for (int i = TIME_PARTITION - 1; i >= 0; i--) {
-    txn->xc->begin = timepoint[i];
-    // latency evaluation per scan range
-    for (int j = 1; j <= RANGE_PARTITION; j++) {
-      util::timer t;
-      ermia::scoped_str_arena s_arena_11(arena);
-
-      static thread_local tpcc_table_scanner s_scanner_11(&arena);
-      s_scanner_11.clear();
-      const stock::key k_s_18(1, 20001);
-      const stock::key k_s_19(1, j * RANGE_IN_STOCK + 20000);
-      TryCatch(tbl_stock(1)->Scan_eval(txn, Encode(str(Size(k_s_18)), k_s_18),
-                                       &Encode(str(Size(k_s_19)), k_s_19),
-                                       s_scanner_11, s_arena_11.get(),
-                                       SCAN_VWEAVER));
-      vweaver_high_skew[i][j - 1] = t.lap_ms();
-    }
-  }
 
 #ifndef HYU_LONG_CHAIN /* HYU_LONG_CHAIN */
-  FILE *fp_vanilla_uniform = fopen("vanilla_uniform_latency.data", "w+");
-  FILE *fp_vanilla_mid_skew = fopen("vanilla_mid_skew_latency.data", "w+");
-  FILE *fp_vanilla_high_skew = fopen("vanilla_high_skew_latency.data", "w+");
-  FILE *fp_skiplist_uniform = fopen("skiplist_uniform_latency.data", "w+");
-  FILE *fp_skiplist_mid_skew = fopen("skiplist_mid_skew_latency.data", "w+");
-  FILE *fp_skiplist_high_skew = fopen("skiplist_high_skew_latency.data", "w+");
-  FILE *fp_vridgy_uniform = fopen("vridgy_uniform_latency.data", "w+");
-  FILE *fp_vridgy_mid_skew = fopen("vridgy_mid_skew_latency.data", "w+");
-  FILE *fp_vridgy_high_skew = fopen("vridgy_high_skew_latency.data", "w+");
-  FILE *fp_vweaver_uniform = fopen("vweaver_uniform_latency.data", "w+");
-  FILE *fp_vweaver_mid_skew = fopen("vweaver_mid_skew_latency.data", "w+");
-  FILE *fp_vweaver_high_skew = fopen("vweaver_high_skew_latency.data", "w+");
+  //FILE *fp_vanilla_uniform = fopen("vanilla_uniform_latency.data", "w+");
+  //FILE *fp_skiplist_uniform = fopen("skiplist_uniform_latency.data", "w+");
+  FILE *fp_vridgy_uniform = fopen("bptree_uniform_latency.data", "w+");
+  //FILE *fp_vweaver_uniform = fopen("rbtree_uniform_latency.data", "w+");
 #else /* HYU_LONG_CHAIN */
   FILE *fp_vweaver_high_skew;
   if (proceed == 50000)
@@ -2455,45 +2232,18 @@ rc_t tpcc_worker::txn_payment() {
   for (int i = TIME_PARTITION - 1; i >= 0; i--) {
     for (int j = 0; j < RANGE_PARTITION; j++) {
 #ifndef HYU_LONG_CHAIN /* HYU_LONG_CHAIN */
-      fprintf(fp_vanilla_uniform, "%d, %d, %lf\n", 10 - i, j + 1,
+      /*fprintf(fp_vanilla_uniform, "%d, %d, %lf\n", 10 - i, j + 1,
               vanilla_uniform[i][j]);
       fflush(fp_vanilla_uniform);
       fprintf(fp_skiplist_uniform, "%d, %d, %lf\n", 10 - i, j + 1,
               skiplist_uniform[i][j]);
-      fflush(fp_skiplist_uniform);
+      fflush(fp_skiplist_uniform);*/
       fprintf(fp_vridgy_uniform, "%d, %d, %lf\n", 10 - i, j + 1,
               vridgy_uniform[i][j]);
       fflush(fp_vridgy_uniform);
-      fprintf(fp_vweaver_uniform, "%d, %d, %lf\n", 10 - i, j + 1,
+      /*fprintf(fp_vweaver_uniform, "%d, %d, %lf\n", 10 - i, j + 1,
               vweaver_uniform[i][j]);
-      fflush(fp_vweaver_uniform);
-
-      fprintf(fp_vanilla_mid_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              vanilla_mid_skew[i][j]);
-      fflush(fp_vanilla_mid_skew);
-      fprintf(fp_skiplist_mid_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              skiplist_mid_skew[i][j]);
-      fflush(fp_skiplist_mid_skew);
-      fprintf(fp_vridgy_mid_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              vridgy_mid_skew[i][j]);
-      fflush(fp_vridgy_mid_skew);
-      fprintf(fp_vweaver_mid_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              vweaver_mid_skew[i][j]);
-      fflush(fp_vweaver_mid_skew);
-
-      fprintf(fp_vanilla_high_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              vanilla_high_skew[i][j]);
-      fflush(fp_vanilla_high_skew);
-      fprintf(fp_skiplist_high_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              skiplist_high_skew[i][j]);
-      fflush(fp_skiplist_high_skew);
-      fprintf(fp_vridgy_high_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              vridgy_high_skew[i][j]);
-      fflush(fp_vridgy_high_skew);
-      fprintf(fp_vweaver_high_skew, "%d, %d, %lf\n", 10 - i, j + 1,
-              vweaver_high_skew[i][j]);
-      fflush(fp_vweaver_high_skew);
-
+      fflush(fp_vweaver_uniform);*/
 #else /* HYU_LONG_CHAIN */
       fprintf(fp_vweaver_high_skew, "%d, %d, %lf\n", 10 - i, j + 1,
               vweaver_high_skew[i][j]);
@@ -2501,50 +2251,24 @@ rc_t tpcc_worker::txn_payment() {
 #endif /* HYU_LONG_CHAIN */
     }
 #ifndef HYU_LONG_CHAIN /* HYU_LONG_CHAIN */
-    fprintf(fp_vanilla_uniform, "\n");
-    fflush(fp_vanilla_uniform);
-    fprintf(fp_skiplist_uniform, "\n");
-    fflush(fp_skiplist_uniform);
+    //fprintf(fp_vanilla_uniform, "\n");
+    //fflush(fp_vanilla_uniform);
+    //fprintf(fp_skiplist_uniform, "\n");
+    //fflush(fp_skiplist_uniform);
     fprintf(fp_vridgy_uniform, "\n");
     fflush(fp_vridgy_uniform);
-    fprintf(fp_vweaver_uniform, "\n");
-    fflush(fp_vweaver_uniform);
-
-    fprintf(fp_vanilla_mid_skew, "\n");
-    fflush(fp_vanilla_mid_skew);
-    fprintf(fp_skiplist_mid_skew, "\n");
-    fflush(fp_skiplist_mid_skew);
-    fprintf(fp_vridgy_mid_skew, "\n");
-    fflush(fp_vridgy_mid_skew);
-    fprintf(fp_vweaver_mid_skew, "\n");
-    fflush(fp_vweaver_mid_skew);
-
-    fprintf(fp_vanilla_high_skew, "\n");
-    fflush(fp_vanilla_high_skew);
-    fprintf(fp_skiplist_high_skew, "\n");
-    fflush(fp_skiplist_high_skew);
-    fprintf(fp_vridgy_high_skew, "\n");
-    fflush(fp_vridgy_high_skew);
-    fprintf(fp_vweaver_high_skew, "\n");
-    fflush(fp_vweaver_high_skew);
+    //fprintf(fp_vweaver_uniform, "\n");
+    //fflush(fp_vweaver_uniform);
 #else /* HYU_LONG_CHAIN */
     fprintf(fp_vweaver_high_skew, "\n");
     fflush(fp_vweaver_high_skew);
 #endif /* HYU_LONG_CHAIN */
   }
 #ifndef HYU_LONG_CHAIN /* HYU_LONG_CHAIN */
-  fclose(fp_vanilla_uniform);
-  fclose(fp_skiplist_uniform);
+  //fclose(fp_vanilla_uniform);
+  //fclose(fp_skiplist_uniform);
   fclose(fp_vridgy_uniform);
-  fclose(fp_vweaver_uniform);
-  fclose(fp_vanilla_mid_skew);
-  fclose(fp_skiplist_mid_skew);
-  fclose(fp_vridgy_mid_skew);
-  fclose(fp_vweaver_mid_skew);
-  fclose(fp_vanilla_high_skew);
-  fclose(fp_skiplist_high_skew);
-  fclose(fp_vridgy_high_skew);
-  fclose(fp_vweaver_high_skew);
+  //fclose(fp_vweaver_uniform);
 #else /* HYU_LONG_CHAIN */
   fclose(fp_vweaver_high_skew);
 #endif /* HYU_LONG_CHAIN */

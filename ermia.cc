@@ -211,12 +211,9 @@ void ConcurrentMasstreeIndex::Get_eval(transaction *t, rc_t &rc,
           if (flag == 1) { //original skiplist
             tuple = oidmgr->oid_get_version_skiplist_eval(descriptor_->GetTupleArray(),
                                                  oid, t->xc); 
-          } else { //vweaver
-            tuple = oidmgr->oid_get_version_eval(descriptor_->GetTupleArray(),
-                                                 oid, t->xc);
           }
 #else
-          tuple = oidmgr->oid_get_version_eval(descriptor_->GetTupleArray(),
+          tuple = oidmgr->oid_get_version(descriptor_->GetTupleArray(),
                                                oid, t->xc);
 #endif
         }
@@ -322,7 +319,7 @@ void ConcurrentMasstreeIndex::Get(transaction *t, rc_t &rc, const varstr &key,
             oidmgr->oid_get_version_bptree(descriptor_->GetTupleArray(), oid,
                                            t->xc);
 				//for debug
-				dbtuple *debug = oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);
+				/*dbtuple *debug = oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);
 				if (debug != tuple) {
           Object *debug_obj = debug->GetObject();
           Object *tuple_obj = tuple->GetObject();
@@ -331,7 +328,7 @@ void ConcurrentMasstreeIndex::Get(transaction *t, rc_t &rc, const varstr &key,
           printf("bptree: %lu, list: %lu\n",
              LSN::from_ptr(tuple_obj->GetClsn()).offset(),
              LSN::from_ptr(debug_obj->GetClsn()).offset());
-        }
+        }*/
 
 #else /* HYU_SKIPLIST */
             oidmgr->oid_get_version(descriptor_->GetTupleArray(), oid, t->xc);

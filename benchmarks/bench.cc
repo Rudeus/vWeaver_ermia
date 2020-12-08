@@ -433,6 +433,12 @@ void bench_runner::start_measurement() {
 #elif defined(HYU_VANILLA_EVAL)
   FILE *skip_throughput = fopen("vanilla_throughput.data", "a+");
   FILE *skip_fp = fopen("vanilla_memuse.data", "a+");
+#elif defined(HYU_BPTREE)
+  FILE *skip_throughput = fopen("bptree_throughput.data", "a+");
+  FILE *skip_fp = fopen("bptree_memuse.data", "a+");
+#elif defined(HYU_RBTREE)
+  FILE *skip_throughput = fopen("rbtree_throughput.data", "a+");
+  FILE *skip_fp = fopen("rbtree_memuse.data", "a+");
 #endif
   workers = make_workers();
   ALWAYS_ASSERT(!workers.empty());
@@ -534,7 +540,7 @@ void bench_runner::start_measurement() {
       printf("%lu,%lu,%lu\n", slept + 1, sec_commits, sec_aborts);
 #if defined(HYU_MOTIVATION)
       fprintf(fp, "%lu,%lu,%lu\n", slept + 1, sec_commits, sec_aborts);
-#elif defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#elif defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_BPTREE) || defined(HYU_RBTREE)
       fprintf(skip_throughput, "%lu,%lu\n", slept + 1, sec_commits);
       fflush(skip_throughput);
       if ((slept + 1) % 10 == 0) {

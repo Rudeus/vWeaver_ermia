@@ -28,7 +28,7 @@
 using google::dense_hash_map;
 
 namespace ermia {
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_BPTREE) || defined(HYU_RBTREE)
 extern uint64_t update_count;
 #endif
 

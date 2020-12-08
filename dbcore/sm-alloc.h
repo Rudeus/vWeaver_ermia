@@ -54,7 +54,7 @@ void gc_version_chain(fat_ptr *oid_entry);
 
 extern uint64_t gc_lsn;
 extern epoch_num gc_epoch;
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_RBTREE) || defined(HYU_BPTREE)
 extern uint64_t memuse;
 #endif
 

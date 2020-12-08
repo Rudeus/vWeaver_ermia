@@ -26,7 +26,7 @@ std::vector<double> v;
 std::vector<double> k;
 #endif /* HYU_EVAL */
 
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_BPTREE) || defined(HYU_RBTREE)
 uint64_t update_count = 0;
 #endif
 
@@ -202,7 +202,7 @@ void transaction::Abort() {
       rbnode *data =  oidmgr->FindRBtreeRightmost(root, entry);
       rb_erase(&data->node, root);
       root->TreeLockRelease();
-      rb_deallocate(data);
+      //rb_deallocate(data);
     }
 #endif /* HYU_RBTREE */
 #ifdef HYU_BPTREE /* HYU_BPTREE */
@@ -1572,7 +1572,7 @@ rc_t transaction::Update(IndexDescriptor *index_desc, OID oid, const varstr *k,
       }
     }
 #if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
-    __sync_fetch_and_add(&update_count, 1);
+    //__sync_fetch_and_add(&update_count, 1);
 #endif
     return rc_t{RC_TRUE};
   } else {  // somebody else acted faster than we did

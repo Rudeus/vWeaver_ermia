@@ -86,22 +86,16 @@ class basic_table {
 
   bool get(Str key, value_type &value, threadinfo &ti) const;
 
-#ifdef HYU_VWEAVER /* HYU_VWEAVER */
 #ifdef HYU_EVAL_2  /* HYU_EVAL_2 */
   template <typename F>
   int scan_eval(Str firstkey, bool matchfirst, F &scanner,
                 ermia::TXN::xid_context *xc, threadinfo &ti,
                 bool is_primary_idx, int scan_flag) const;
 #endif /* HYU_EVAL_2 */
-  template <typename F>
-  int scan(Str firstkey, bool matchfirst, F &scanner,
-           ermia::TXN::xid_context *xc, threadinfo &ti,
-           bool is_primary_idx) const;
-#else  /* HYU_VWEAVER */
+
   template <typename F>
   int scan(Str firstkey, bool matchfirst, F &scanner,
            ermia::TXN::xid_context *xc, threadinfo &ti) const;
-#endif /* HYU_VWEAVER */
   template <typename F>
   int rscan(Str firstkey, bool matchfirst, F &scanner,
             ermia::TXN::xid_context *xc, threadinfo &ti) const;
@@ -126,13 +120,6 @@ class basic_table {
   node_type *root_;
   ermia::oid_array *tuple_array_;
   ermia::oid_array *pdest_array_;
-
-#ifdef HYU_VWEAVER /* HYU_VWEAVER */
-  template <typename H, typename F>
-  int scan_zigzag(H helper, Str firstkey, bool matchfirst, F &scanner,
-                  ermia::TXN::xid_context *xc, threadinfo &ti, bool pr) const;
-
-#endif /* HYU_VWEAVER */
 
 #ifdef HYU_EVAL_2 /* HYU_EVAL_2 */
   template <typename H, typename F>

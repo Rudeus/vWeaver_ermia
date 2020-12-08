@@ -6,7 +6,7 @@
 
 namespace ermia {
 #ifdef HYU_VWEAVER /* HYU_VWEAVER */
-#define MAX_LEVEL (255)
+//#define MAX_LEVEL (255)
 #endif /* HYU_VWEAVER */
 
 #ifdef HYU_SKIPLIST /* HYU_SKIPLIST */

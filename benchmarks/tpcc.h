@@ -6,8 +6,8 @@
 
 #if defined(HYU_EVAL_2) || defined(HYU_EVAL_OBJ) /* HYU_EVAL_2 */
 #define SCAN_VANILLA 0
-#define SCAN_VRIDGY 1
-#define SCAN_VWEAVER 2
+#define SCAN_BPTREE 1
+#define SCAN_RBTREE 2
 #define SCAN_SKIPLIST 3
 #define TIME_PARTITION (10)
 #define RANGE_PARTITION (10)

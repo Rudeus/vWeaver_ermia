@@ -243,8 +243,6 @@ struct sm_oid_mgr {
 #if defined(HYU_EVAL_2) || defined(HYU_EVAL_OBJ) /* HYU_EVAL_2 */
   dbtuple *oid_get_version_eval_stack(oid_array *oa, OID o,
                                       TXN::xid_context *visitor_xc);
-  dbtuple *oid_get_version_eval(oid_array *oa, OID o,
-                                TXN::xid_context *visitor_xc);
 #ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
   dbtuple *oid_get_version_skiplist_eval(oid_array *oa, OID o,
                                 TXN::xid_context *visitor_xc);

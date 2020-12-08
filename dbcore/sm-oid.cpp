@@ -1236,7 +1236,7 @@ install:
       struct rb_root *rbroot = (struct rb_root *)new_object->GetRoot().offset();
       old_desc->SetPrev(*new_obj_ptr);
       rbroot->TreeLockAcquire();
-      bool submit = InsertRBtree(rbroot, new_rbnode);
+      bool rbtree_submit = InsertRBtree(rbroot, new_rbnode);
       rbroot->TreeLockRelease();
 #endif /* HYU_RBTREE */
 
@@ -1247,7 +1247,7 @@ install:
       uint64_t key = impl->_log->_lm._lsn_offset;
       if (key_root == key) key++;
       bptroot->BPTreeLockAcquire();
-      bool submit = BPlusTree_Insert(bptroot, key, *new_obj_ptr);
+      bool bptree_submit = BPlusTree_Insert(bptroot, key, *new_obj_ptr);
       bptroot->BPTreeLockRelease();
 #endif /* HYU_BPTREE */
 
@@ -1611,120 +1611,7 @@ start_over:
   // fclose(fp);
   return nullptr;  // No Visible records
 }
-// For tuple arrays only, i.e., entries are guaranteed to point to Objects.
-dbtuple *sm_oid_mgr::oid_get_version_eval(oid_array *oa, OID o,
-                                          TXN::xid_context *visitor_xc) {
-  fat_ptr *entry = oa->get(o);
-start_over:
-  fat_ptr ptr = volatile_read(*entry);
-  ASSERT(ptr.asi_type() == 0);
-  Object *prev_obj = nullptr;
-  uint64_t next_gced_cnt = 0;
-  uint64_t next_vi_cnt = 0;
-  uint64_t next_null_cnt = 0;
-  //uint64_t total_next_cnt = 0;
-  uint64_t v_ridgy_cnt = 0;
-  // for tracking
-	int cur_level = 0;
-  //printf("start count!\n");
-  //FILE* fp_cnt = fopen("chain_count_weaver.data", "a+");
-  //fprintf(fp_cnt, "timestamp: %lu\n", visitor_xc->begin);
-  //fflush(fp_cnt);
-  while (ptr.offset()) {
-    Object *cur_obj = nullptr;
-    Object *v_ridgy_obj = nullptr;
-    // Must read next_ before reading cur_obj->_clsn:
-    // the version we're currently reading (ie cur_obj) might be unlinked
-    // and thus recycled by the memory allocator at any time if it's not
-    // a committed version. If so, cur_obj->_next will be pointing to some
-    // other object in the allocator's free object pool - we'll probably
-    // end up at la-la land if we followed this _next pointer value...
-    // Here we employ some flavor of OCC to solve this problem:
-    // the aborting transaction that will unlink cur_obj will update
-    // cur_obj->_clsn to NULL_PTR, then deallocate(). Before reading
-    // cur_obj->_clsn, we (as the visitor), first dereference pp to get
-    // a stable value that "should" contain the right address of the next
-    // version. We then read cur_obj->_clsn to verify: if it's NULL_PTR
-    // that means we might have read a wrong _next value that's actually
-    // pointing to some irrelevant object in the allocator's memory pool,
-    // hence must start over from the beginning of the version chain.
-    fat_ptr tentative_next = NULL_PTR;
-    fat_ptr tentative_v_ridgy = NULL_PTR;
-    // If this is a backup server, then must see persistent_next to find out
-    // the **real** overwritten version.
-    if (config::is_backup_srv() && !config::command_log) {
-      printf("[HYU] we only think about there is no replica\n");
-      oid_get_version_backup(ptr, tentative_next, prev_obj, cur_obj,
-                             visitor_xc);
-    } else {
-      ASSERT(ptr.asi_type() == 0);
-      cur_obj = (Object *)ptr.offset();
-      tentative_next = cur_obj->GetNextVolatile();
-      tentative_v_ridgy = cur_obj->GetVRidgy();
-      ASSERT(tentative_next.asi_type() == 0);
-      ASSERT(tentative_v_ridgy.asi_type() == 0);
-      // cur_level = cur_obj->GetLevel();
-      // fprintf(fp_cnt, "lev: %d\n", cur_level);
-      // fflush(fp_cnt);
-    }
 
-    bool retry = false;
-    bool visible = TestVisibility(cur_obj, visitor_xc, retry);
-    if (retry) {
-      goto start_over;
-    }
-    if (visible) {
-      total_next_cnt = next_null_cnt + next_gced_cnt + next_vi_cnt;
-      //fprintf(fp_cnt, "%lu\n", total_next_cnt);
-      //printf("%lu\n", total_next_cnt + v_ridgy_cnt);
-      //fprintf(fp_cnt, " %lu\n", total_next_cnt + v_ridgy_cnt);
-      //fflush(fp_cnt);
-      //fclose(fp_cnt);
-      return cur_obj->GetPinnedTuple();
-    } else {
-      v_ridgy_obj = (Object *)tentative_v_ridgy.offset();
-
-      if (v_ridgy_obj == NULL) {
-        ptr = tentative_next;
-        prev_obj = cur_obj;
-        next_null_cnt++;
-        continue;
-      }
-
-      fat_ptr hw_clsn = v_ridgy_obj->GetClsn();
-      // is GCed?
-      if (hw_clsn.asi_type() != fat_ptr::ASI_LOG ||
-          LSN::from_ptr(hw_clsn).offset() >
-              LSN::from_ptr(cur_obj->GetClsn()).offset()) {
-        ptr = tentative_next;
-        prev_obj = cur_obj;
-        next_gced_cnt++;
-        continue;
-      }
-
-      bool v_ridgy_retry = false;
-      bool v_ridgy_visible =
-          TestVisibility(v_ridgy_obj, visitor_xc, v_ridgy_retry);
-
-      if (v_ridgy_retry || v_ridgy_visible) {
-        ptr = tentative_next;
-        next_vi_cnt++;
-      } else {
-        v_ridgy_cnt++;
-        ptr = tentative_v_ridgy;
-      }
-      prev_obj = cur_obj;
-    }
-  }
-
-  total_next_cnt = next_null_cnt + next_gced_cnt + next_vi_cnt;
-  //fprintf(fp_cnt, "%lu\n", total_next_cnt);
-  //printf("%lu at the end\n", total_next_cnt + v_ridgy_cnt);
-  // fprintf(fp_cnt, " %lu\n", total_next_cnt + v_ridgy_cnt);
-  //fflush(fp_cnt);
-  //fclose(fp_cnt);
-  return nullptr;  // No Visible records
-}
 #ifdef HYU_SKIPLIST /* HYU_SKIPLIST */
 // For tuple arrays only, i.e., entries are guaranteed to point to Objects.
 dbtuple *sm_oid_mgr::oid_get_version_skiplist_eval(oid_array *oa, OID o,
@@ -2329,7 +2216,8 @@ start_over:
 
   }
 
-  root->TreeLockRelease();
+	if (root)
+  	root->TreeLockRelease();
   return nullptr;  // No Visible records
 }
 

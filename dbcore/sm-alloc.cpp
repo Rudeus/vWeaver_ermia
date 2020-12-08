@@ -58,7 +58,7 @@ uint64_t safesnap_lsn = 0;
 thread_local TlsFreeObjectPool *tls_free_object_pool CACHE_ALIGNED;
 char **node_memory = nullptr;
 uint64_t *allocated_node_memory = nullptr;
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_BPTREE) || defined(HYU_RBTREE)
 uint64_t memuse = 0;
 #endif
 static uint64_t thread_local tls_allocated_node_memory CACHE_ALIGNED;
@@ -362,7 +362,7 @@ void *allocate_onnode(size_t size) {
   auto node = numa_node_of_cpu(sched_getcpu());
   ALWAYS_ASSERT(node < config::numa_nodes);
   auto offset = __sync_fetch_and_add(&allocated_node_memory[node], size);
-#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL)
+#if defined(HYU_SKIPLIST) || defined(HYU_SKIPLIST_EVAL) || defined(HYU_VANILLA_EVAL) || defined(HYU_RBTREE) || defined(HYU_BPTREE)
   memuse = allocated_node_memory[node] / config::MB;
 #endif
   if (likely(offset + size <= config::node_memory_gb * config::GB)) {
